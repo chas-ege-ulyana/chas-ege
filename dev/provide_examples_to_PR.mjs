@@ -81,8 +81,7 @@ function formatForGitHub(latexText) {
     let result = latexText.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
         return '\n```math\n' + formula.trim() + '\n```\n';
     });
-    result = result.replace(/
-/g, '\n\n');
+    result = result.replace(/\\\\/g, '\n\n');
     
     // Remove LaTeX tables: \begin{tabular}...\end{tabular}
     result = result.replace(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/g, '');
