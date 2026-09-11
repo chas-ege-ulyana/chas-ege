@@ -189,3 +189,20 @@ export async function postComment(owner, repo, prNum, body, token) {
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
     return response.json();
 }
+
+export async function getFileContent(owner, repo, filePath, ref, token) {
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${ref}`;
+    const response = await fetch(url, {
+        headers: {
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'chas-ege-provide-examples-all-prs',
+            ...(token && { 'Authorization': `token ${token}` })
+        }
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (data.encoding === 'base64' && data.content) {
+        return Buffer.from(data.content, 'base64').toString('utf8');
+    }
+    return null;
+}

@@ -6,6 +6,7 @@ import os from 'os';
 import { execFile } from 'child_process';
 import util from 'util';
 import { fileURLToPath } from 'url';
+import { getFileContent } from './lib/github-api.mjs';
 
 const execFileAsync = util.promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
@@ -160,23 +161,6 @@ async function isLastCommentInPR(issueComments, reviewComments, targetCommentId)
     allComments.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     if (allComments.length === 0) return false;
     return allComments[allComments.length - 1].id === targetCommentId;
-}
-
-async function getFileContent(filePath, ref, token) {
-    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${ref}`;
-    const response = await fetch(url, {
-        headers: {
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'chas-ege-provide-examples-all-prs',
-            ...(token && { 'Authorization': `token ${token}` })
-        }
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    if (data.encoding === 'base64' && data.content) {
-        return Buffer.from(data.content, 'base64').toString('utf8');
-    }
-    return null;
 }
 
 async function checkDevelCommits(token) {
@@ -366,8 +350,8 @@ async function main() {
                     }
                 }
 
-                const currentFileContent = await getFileContent(commentedFile, pr.head.sha, token);
-                const oldFileContent = await getFileContent(commentedFile, commitHash, token);
+                const currentFileContent = await getFileContent(owner, repo, commentedFile, pr.head.sha, token);
+                const oldFileContent = await getFileContent(owner, repo, commentedFile, commitHash, token);
                 
                 if (currentFileContent !== oldFileContent) {
                     console.log(`File ${commentedFile} differs. Generating.`);
