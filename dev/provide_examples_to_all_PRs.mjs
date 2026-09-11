@@ -315,7 +315,6 @@ async function main() {
 
                 const lastComment = exampleComments[exampleComments.length - 1];
                 const commentBody = lastComment.body;
-                
                 const match = commentBody.match(/ПРИМЕРЫ_ЗАДАЧ\s+([^\s]+)\s+([0-9a-f]+)\s+сборка\s+([0-9a-f]+)/);
                 if (!match) {
                     console.log(`Could not parse ПРИМЕРЫ_ЗАДАЧ comment in PR #${pr.number}. Generating.`);
@@ -323,7 +322,9 @@ async function main() {
                     continue;
                 }
 
-                const [, commentedFile, commitHash, buildCommit] = match;
+                let commentedFile = match[1].replace(/^`|`$/g, '');
+                const commitHash = match[2];
+                const buildCommit = match[3];
 
                 if (buildCommit !== currentGitStatus) {
                     const compareUrl = `https://api.github.com/repos/${owner}/${repo}/compare/${buildCommit}...${currentGitStatus}`;
