@@ -197,11 +197,12 @@ export async function getFileContent(owner, repo, filePath, ref, token) {
         return stdout;
     } catch (e) {
         // Локально не получилось, пробуем следующий вариант
+        console.warn(`[getFileContent] Локально не удалось получить файл "${filePath}" из коммита "${ref}": ${e.message}`);
     }
 
     // 2. Fetch raw URL (не тратит API rate limit)
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${filePath}`;
     try {
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${filePath}`;
         const response = await fetch(rawUrl, {
             headers: {
                 'User-Agent': 'chas-ege-provide-examples-all-prs',
@@ -211,8 +212,10 @@ export async function getFileContent(owner, repo, filePath, ref, token) {
         if (response.ok) {
             return await response.text();
         }
+        console.warn(`[getFileContent] Не удалось получить файл через raw.githubusercontent URL: ${rawUrl}, статус: ${response.status} ${response.statusText}`);
     } catch (e) {
         // Raw fetch не удался, пробуем API
+        console.warn(`[getFileContent] Ошибка при запросе к raw.githubusercontent URL: ${rawUrl}, ошибка: ${e.message}`);
     }
 
     // 3. GitHub API (тратит API rate limit, используем только в крайнем случае)
