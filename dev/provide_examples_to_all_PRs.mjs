@@ -353,6 +353,12 @@ async function main() {
                 const currentFileContent = await getFileContent(owner, repo, commentedFile, pr.head.sha, token);
                 const oldFileContent = await getFileContent(owner, repo, commentedFile, commitHash, token);
                 
+                console.log(`[DEBUG] PR #${pr.number}: commentedFile=${commentedFile}`);
+                console.log(`[DEBUG] PR #${pr.number}: pr.head.sha=${pr.head.sha}`);
+                console.log(`[DEBUG] PR #${pr.number}: commitHash=${commitHash}`);
+                console.log(`[DEBUG] PR #${pr.number}: currentFileContent length=${currentFileContent ? currentFileContent.length : 'null'}`);
+                console.log(`[DEBUG] PR #${pr.number}: oldFileContent length=${oldFileContent ? oldFileContent.length : 'null'}`);
+
                 if (currentFileContent !== oldFileContent) {
                     console.log(`File ${commentedFile} differs. Generating.`);
                     await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);

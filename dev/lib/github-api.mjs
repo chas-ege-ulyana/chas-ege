@@ -191,35 +191,41 @@ export async function postComment(owner, repo, prNum, body, token) {
 }
 
 export async function getFileContent(owner, repo, filePath, ref, token) {
+    console.log(`[DEBUG getFileContent] owner=${owner}, repo=${repo}, filePath=${filePath}, ref=${ref}`);
     // 1. Локально через git (если коммит/ветка есть в локальном репозитории)
     try {
         const { stdout } = await execFileAsync('git', ['show', `${ref}:${filePath}`]);
+        console.log(`[DEBUG getFileContent] git show succeeded, length=${stdout.length}`);
         return stdout;
     } catch (e) {
+        console.log(`[DEBUG getFileContent] git show failed: ${e.message}`);
         // Локально не получилось, пробуем следующий вариант
-        console.warn(`[getFileContent] Локально не удалось получить файл "${filePath}" из коммита "${ref}": ${e.message}`);
     }
 
     // 2. Fetch raw URL (не тратит API rate limit)
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${filePath}`;
     try {
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${filePath}`;
+        console.log(`[DEBUG getFileContent] Fetching rawUrl: ${rawUrl}`);
         const response = await fetch(rawUrl, {
             headers: {
                 'User-Agent': 'chas-ege-provide-examples-all-prs',
                 ...(token && { 'Authorization': `token ${token}` })
             }
         });
+        console.log(`[DEBUG getFileContent] rawUrl response status: ${response.status}`);
         if (response.ok) {
-            return await response.text();
+            const text = await response.text();
+            console.log(`[DEBUG getFileContent] rawUrl succeeded, length=${text.length}`);
+            return text;
         }
-        console.warn(`[getFileContent] Не удалось получить файл через raw.githubusercontent URL: ${rawUrl}, статус: ${response.status} ${response.statusText}`);
     } catch (e) {
+        console.log(`[DEBUG getFileContent] rawUrl fetch exception: ${e.message}`);
         // Raw fetch не удался, пробуем API
-        console.warn(`[getFileContent] Ошибка при запросе к raw.githubusercontent URL: ${rawUrl}, ошибка: ${e.message}`);
     }
 
     // 3. GitHub API (тратит API rate limit, используем только в крайнем случае)
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${ref}`;
+    console.log(`[DEBUG getFileContent] Fetching API url: ${url}`);
     const response = await fetch(url, {
         headers: {
             'Accept': 'application/vnd.github.v3+json',
@@ -227,11 +233,18 @@ export async function getFileContent(owner, repo, filePath, ref, token) {
             ...(token && { 'Authorization': `token ${token}` })
         }
     });
-    if (!response.ok) return null;
+    console.log(`[DEBUG getFileContent] API response status: ${response.status}`);
+    if (!response.ok) {
+        console.log(`[DEBUG getFileContent] API failed, returning null`);
+        return null;
+    }
     const data = await response.json();
     if (data.encoding === 'base64' && data.content) {
-        return Buffer.from(data.content, 'base64').toString('utf8');
+        const text = Buffer.from(data.content, 'base64').toString('utf8');
+        console.log(`[DEBUG getFileContent] API succeeded, length=${text.length}`);
+        return text;
     }
+    console.log(`[DEBUG getFileContent] API data invalid, returning null`);
     return null;
 }
 
