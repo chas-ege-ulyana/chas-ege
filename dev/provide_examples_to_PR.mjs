@@ -7,6 +7,15 @@ import crypto from 'crypto';
 import { execFile } from 'child_process';
 import util from 'util';
 import { fileURLToPath } from 'url';
+import {
+    getGitHubToken,
+    getRepositoryId,
+    fetchAllPRFiles,
+    getPRHeadSha,
+    findLastCommentId,
+    editComment,
+    postComment
+} from './lib/github-api.mjs';
 
 const execFileAsync = util.promisify(execFile);
 
@@ -33,48 +42,6 @@ if (!debugArgs.includes('--headless')) {
 
 const owner = 'nickkolok';
 const repo = 'chas-ege';
-
-async function getGitHubToken() {
-    if (process.env.GITHUB_TOKEN) {
-        return process.env.GITHUB_TOKEN;
-    }
-    try {
-        const { stdout } = await execFileAsync('gh', ['auth', 'token']);
-        return stdout.trim();
-    } catch (e) {
-        console.warn('Could not get token via `gh auth token` or GITHUB_TOKEN.');
-        return null;
-    }
-}
-
-async function fetchAllPRFiles(prNum, token) {
-    let allFiles = [];
-    let url = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNum}/files?per_page=100`;
-
-    while (url) {
-        const response = await fetch(url, {
-            headers: {
-                'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'chas-ege-provide-examples-script',
-                ...(token && { 'Authorization': `token ${token}` })
-            }
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-        
-        const data = await response.json();
-        allFiles = allFiles.concat(data);
-
-        const linkHeader = response.headers.get('link');
-        if (linkHeader) {
-            const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-            url = nextMatch ? nextMatch[1] : null;
-        } else {
-            url = null;
-        }
-    }
-
-    return allFiles;
-}
 
 async function fetchRaw(url) {
     const response = await fetch(url, {
@@ -114,7 +81,8 @@ function formatForGitHub(latexText) {
     let result = latexText.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
         return '\n```math\n' + formula.trim() + '\n```\n';
     });
-    result = result.replace(/\\\\/g, '\n\n');
+    result = result.replace(/
+/g, '\n\n');
     
     // Remove LaTeX tables: \begin{tabular}...\end{tabular}
     result = result.replace(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/g, '');
@@ -176,7 +144,7 @@ async function replaceBase64ImagesWithUploads(latexText, prNum, token, repositor
             const downloadUrl = await uploadImageViaUserAttachments(base64Data, mimeType, prNum, token, repositoryId);
             
             // Replace the commented img tag with markdown image
-            const imgMarkdown = `\n![illustration](${downloadUrl})\n`;
+            const imgMarkdown = `\n\n`;
             result = result.replace(fullMatch, imgMarkdown);
             console.log(`  -> Uploaded: ${downloadUrl}`);
         } catch (e) {
@@ -189,105 +157,18 @@ async function replaceBase64ImagesWithUploads(latexText, prNum, token, repositor
     return result;
 }
 
-async function getLastCommentId(prNum, token) {
-    let comments = [];
-    let url = `https://api.github.com/repos/${owner}/${repo}/issues/${prNum}/comments?per_page=100`;
-    while (url) {
-        const response = await fetch(url, {
-            headers: {
-                'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'chas-ege-provide-examples-script',
-                ...(token && { 'Authorization': `token ${token}` })
-            }
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-        const data = await response.json();
-        comments = comments.concat(data);
-        const linkHeader = response.headers.get('link');
-        if (linkHeader) {
-            const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-            url = nextMatch ? nextMatch[1] : null;
-        } else {
-            url = null;
-        }
-    }
-    const exampleComments = comments.filter(c => c.body.includes('ПРИМЕРЫ_ЗАДАЧ'));
-    if (exampleComments.length === 0) return null;
-    return exampleComments[exampleComments.length - 1].id;
-}
-
-async function editComment(commentId, body, token) {
-    const url = `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`;
-    const response = await fetch(url, {
-        method: 'PATCH',
-        headers: {
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json',
-            'User-Agent': 'chas-ege-provide-examples-script',
-            'Authorization': `token ${token}`
-        },
-        body: JSON.stringify({ body })
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-    return response.json();
-}
-
-async function postComment(prNum, body, token) {
-    const url = `https://api.github.com/repos/${owner}/${repo}/issues/${prNum}/comments`;
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json',
-            'User-Agent': 'chas-ege-provide-examples-script',
-            'Authorization': `token ${token}`
-        },
-        body: JSON.stringify({ body })
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-    return response.json();
-}
-
-
-async function getPRHeadSha(prNum, token) {
-    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNum}`, {
-        headers: {
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'chas-ege-provide-examples-script',
-            ...(token && { 'Authorization': `token ${token}` })
-        }
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-    const data = await response.json();
-    return data.head.sha;
-}
-
 async function main() {
     console.log(`Processing PR #${prNumber}...`);
     const token = await getGitHubToken();
 
     let repositoryId = null;
     if (token) {
-        try {
-            const repoInfoUrl = `https://api.github.com/repos/${owner}/${repo}`;
-            const repoInfoResp = await fetch(repoInfoUrl, {
-                headers: {
-                    'Accept': 'application/vnd.github.v3+json',
-                    'User-Agent': 'chas-ege-provide-examples-script',
-                    'Authorization': `token ${token}`
-                }
-            });
-            if (repoInfoResp.ok) {
-                repositoryId = (await repoInfoResp.json()).id;
-            }
-        } catch (e) {
-            console.warn('Failed to fetch repository ID:', e.message);
-        }
+        repositoryId = await getRepositoryId(owner, repo, token);
     }
 
     let files;
     try {
-        files = await fetchAllPRFiles(prNumber, token);
+        files = await fetchAllPRFiles(owner, repo, prNumber, token);
     } catch (e) {
         console.error('Failed to fetch PR files:', e.message);
         process.exit(1);
@@ -303,11 +184,10 @@ async function main() {
     
     let headSha = 'unknown';
     try {
-        headSha = await getPRHeadSha(prNumber, token);
+        headSha = await getPRHeadSha(owner, repo, prNumber, token);
     } catch (e) {
         console.warn('Failed to fetch PR head SHA:', e.message);
     }
-
 
     try {
         for (const file of files) {
@@ -376,22 +256,22 @@ async function main() {
         } else {
             try {
                 if (editLast) {
-                    const lastCommentId = await getLastCommentId(prNumber, token);
+                    const lastCommentId = await findLastCommentId(owner, repo, prNumber, token, 'ПРИМЕРЫ_ЗАДАЧ');
                     if (lastCommentId) {
                         try {
-                            await editComment(lastCommentId, commentBody, token);
+                            await editComment(owner, repo, lastCommentId, commentBody, token);
                             console.log('Successfully edited last comment in PR.');
                         } catch (editError) {
                             console.warn(`Failed to edit last comment (${editError.message}). Posting new comment instead.`);
-                            await postComment(prNumber, commentBody, token);
+                            await postComment(owner, repo, prNumber, commentBody, token);
                             console.log('Successfully posted new comment to PR.');
                         }
                     } else {
-                        await postComment(prNumber, commentBody, token);
+                        await postComment(owner, repo, prNumber, commentBody, token);
                         console.log('No ПРИМЕРЫ_ЗАДАЧ comment found, posted new comment to PR.');
                     }
                 } else {
-                    await postComment(prNumber, commentBody, token);
+                    await postComment(owner, repo, prNumber, commentBody, token);
                     console.log('Successfully posted comment to PR.');
                 }
             } catch (e) {
