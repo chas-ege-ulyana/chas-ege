@@ -191,6 +191,31 @@ export async function postComment(owner, repo, prNum, body, token) {
 }
 
 export async function getFileContent(owner, repo, filePath, ref, token) {
+    // 1. Локально через git (если коммит/ветка есть в локальном репозитории)
+    try {
+        const { stdout } = await execFileAsync('git', ['show', `${ref}:${filePath}`]);
+        return stdout;
+    } catch (e) {
+        // Локально не получилось, пробуем следующий вариант
+    }
+
+    // 2. Fetch raw URL (не тратит API rate limit)
+    try {
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${filePath}`;
+        const response = await fetch(rawUrl, {
+            headers: {
+                'User-Agent': 'chas-ege-provide-examples-all-prs',
+                ...(token && { 'Authorization': `token ${token}` })
+            }
+        });
+        if (response.ok) {
+            return await response.text();
+        }
+    } catch (e) {
+        // Raw fetch не удался, пробуем API
+    }
+
+    // 3. GitHub API (тратит API rate limit, используем только в крайнем случае)
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${ref}`;
     const response = await fetch(url, {
         headers: {
@@ -206,3 +231,4 @@ export async function getFileContent(owner, repo, filePath, ref, token) {
     }
     return null;
 }
+
