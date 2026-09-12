@@ -213,6 +213,70 @@ async function runProvideScript(prNum, extraArgs) {
     }
 }
 
+
+async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token) {
+    const symlinks = new Set();
+    const candidates = new Set(candidatePaths);
+    const headers = {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'chas-ege-provide-examples-all-prs',
+        'Authorization': `token ${token}`
+    };
+    try {
+        const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`, { headers });
+        if (!resp.ok) {
+            console.warn(`fetchSymlinkPaths: trees API responded ${resp.status}, not excluding anything`);
+            return symlinks;
+        }
+        const data = await resp.json();
+        if (data.truncated) {
+            console.warn('fetchSymlinkPaths: recursive tree truncated, falling back to per-directory walk');
+            return await fetchSymlinkPathsPerDir(owner, repo, sha, candidatePaths, token);
+        }
+        for (const entry of data.tree || []) {
+            if (entry.mode === '120000' && candidates.has(entry.path)) {
+                symlinks.add(entry.path);
+            }
+        }
+    } catch (e) {
+        console.warn('fetchSymlinkPaths error:', e.message);
+    }
+    return symlinks;
+}
+
+async function fetchSymlinkPathsPerDir(owner, repo, sha, candidatePaths, token) {
+    const symlinks = new Set();
+    const candidatesSet = new Set(candidatePaths);
+    const headers = {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'chas-ege-provide-examples-all-prs',
+        'Authorization': `token ${token}`
+    };
+    
+    const dirs = new Set();
+    for (const p of candidatePaths) {
+        const dir = p.substring(0, p.lastIndexOf('/'));
+        if (dir) dirs.add(dir);
+    }
+    
+    for (const dir of dirs) {
+        try {
+            const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${sha}:${dir}`, { headers });
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            for (const entry of data.tree || []) {
+                const fullPath = `${dir}/${entry.path}`;
+                if (entry.mode === '120000' && candidatesSet.has(fullPath)) {
+                    symlinks.add(fullPath);
+                }
+            }
+        } catch (e) {
+            console.warn(`fetchSymlinkPathsPerDir error for ${dir}:`, e.message);
+        }
+    }
+    return symlinks;
+}
+
 async function main() {
     console.log('Starting script to process all PRs...');
     const token = await getGitHubToken();
@@ -259,29 +323,14 @@ async function main() {
                     if (f.filename.startsWith('md/') || f.filename.startsWith('doc/')) return false;
                     if (/^zdn\/[^\/]+\/[^\/]+\/(main|fipi)\.js$/.test(f.filename)) return false;
                     if (/^zdn\/[^\/]+\/[^\/]+\.js$/.test(f.filename)) return false;
-                    return true;
+                    return /^zdn\/[^\/]+\/[^\/]+\/[^\/]+\.js$/.test(f.filename);
                 });
                 
-                let symlinkChecked = await Promise.all(validFiles.map(async f => {
-                    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${f.filename}?ref=${pr.head.sha}`;
-                    try {
-                        const resp = await fetch(url, {
-                            headers: {
-                                'Accept': 'application/vnd.github.v3+json',
-                                'User-Agent': 'chas-ege-provide-examples-all-prs',
-                                'Authorization': `token ${token}`
-                            }
-                        });
-                        if (resp.ok) {
-                            const data = await resp.json();
-                            return data.type === 'symlink';
-                        }
-                    } catch(e) {}
-                    return false;
-                }));
-                
-                validFiles = validFiles.filter((f, i) => !symlinkChecked[i]);
-                validFiles = validFiles.filter(f => /^zdn\/[^\/]+\/[^\/]+\/[^\/]+\.js$/.test(f.filename));
+                const symlinkPaths = await fetchSymlinkPaths(owner, repo, pr.head.sha, validFiles.map(f => f.filename), token);
+                if (symlinkPaths.size > 0) {
+                    console.log(`Excluding symlinks from file count: ${[...symlinkPaths].join(', ')}`);
+                }
+                validFiles = validFiles.filter(f => !symlinkPaths.has(f.filename));
 
                 if (validFiles.length < 1 || validFiles.length > 4) {
                     console.log(`PR #${pr.number} has ${validFiles.length} valid zdn/*/*/*.js files. Skipping.`);
