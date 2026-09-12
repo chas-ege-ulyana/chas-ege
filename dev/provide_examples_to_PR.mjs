@@ -14,7 +14,8 @@ import {
     getPRHeadSha,
     findLastCommentId,
     editComment,
-    postComment
+    postComment,
+    fetchSymlinkPaths
 } from './lib/github-api.mjs';
 
 const execFileAsync = util.promisify(execFile);
