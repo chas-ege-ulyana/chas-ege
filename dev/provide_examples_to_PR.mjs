@@ -156,6 +156,88 @@ async function replaceBase64ImagesWithUploads(latexText, prNum, token, repositor
     return result;
 }
 
+
+async function fetchSymlinkPathsLocal(owner, repo, sha, candidatePaths) {
+    const symlinks = new Set();
+    const candidates = new Set(candidatePaths);
+    
+    // Try local git first to save API requests
+    try {
+        // First try ls-tree directly (in case sha is already fetched)
+        try {
+            const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha], { cwd: projectRoot });
+            const lines = stdout.split('\n');
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                const parts = line.split(/\s+/);
+                if (parts.length >= 4) {
+                    const mode = parts[0];
+                    const filePath = parts[3];
+                    if (mode === '120000' && candidates.has(filePath)) {
+                        symlinks.add(filePath);
+                    }
+                }
+            }
+            console.log(`[symlink-detect] Used local git (sha already present), found ${symlinks.size} symlinks`);
+            return symlinks;
+        } catch (e) {
+            console.log(`[symlink-detect] sha ${sha} not found locally, attempting fetch...`);
+        }
+        
+        // Fetch the commit
+        await execFileAsync('git', ['fetch', 'origin'], { cwd: projectRoot, timeout: 30000 });
+        
+        // Now try ls-tree again
+        const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha], { cwd: projectRoot });
+        const lines = stdout.split('\n');
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            const parts = line.split(/\s+/);
+            if (parts.length >= 4) {
+                const mode = parts[0];
+                const filePath = parts[3];
+                if (mode === '120000' && candidates.has(filePath)) {
+                    symlinks.add(filePath);
+                }
+            }
+        }
+        console.log(`[symlink-detect] Used local git (after fetch), found ${symlinks.size} symlinks`);
+        return symlinks;
+    } catch (e) {
+        console.warn(`[symlink-detect] Local git failed (${e.message}), falling back to API`);
+    }
+    
+    // Fallback to API
+    const token = await getGitHubToken();
+    if (!token) {
+        console.warn('[symlink-detect] No GitHub token available, cannot fallback to API');
+        return symlinks;
+    }
+    
+    const apiHeaders = {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'chas-ege-provide-examples-script',
+        'Authorization': `token ${token}`
+    };
+    try {
+        const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`, { headers: apiHeaders });
+        if (!resp.ok) {
+            console.warn(`[symlink-detect] Trees API responded ${resp.status}, not excluding anything`);
+            return symlinks;
+        }
+        const data = await resp.json();
+        for (const entry of data.tree || []) {
+            if (entry.mode === '120000' && candidates.has(entry.path)) {
+                symlinks.add(entry.path);
+            }
+        }
+        console.log(`[symlink-detect] Used API, found ${symlinks.size} symlinks`);
+    } catch (e) {
+        console.warn('[symlink-detect] API error:', e.message);
+    }
+    return symlinks;
+}
+
 async function main() {
     console.log(`Processing PR #${prNumber}...`);
     const token = await getGitHubToken();
@@ -188,9 +270,24 @@ async function main() {
         console.warn('Failed to fetch PR head SHA:', e.message);
     }
 
+    // Detect symlinks to skip them during example generation
+    const candidatePaths = files
+        .filter(f => f.status !== 'removed' && pattern.test(f.filename))
+        .map(f => f.filename);
+    const symlinkPaths = await fetchSymlinkPathsLocal(owner, repo, headSha, candidatePaths);
+    if (symlinkPaths.size > 0) {
+        console.log(`Will skip ${symlinkPaths.size} symlink(s): ${[...symlinkPaths].join(', ')}`);
+    }
+
     try {
         for (const file of files) {
             if (file.status === 'removed' || !file.raw_url) continue;
+            
+            // Skip symlinks - they don't need example generation
+            if (symlinkPaths.has(file.filename)) {
+                console.log(`Skipping symlink: ${file.filename}`);
+                continue;
+            }
             if (!pattern.test(file.filename)) continue;
 
             console.log(`Processing ${file.filename}...`);
