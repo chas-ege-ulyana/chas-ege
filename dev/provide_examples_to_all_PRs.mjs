@@ -220,14 +220,33 @@ async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token) {
     
     // Try local git first to save API requests
     try {
-        // Fetch the specific commit
-        await execFileAsync('git', ['fetch', 'origin', sha], { cwd: projectRoot });
+        // First try ls-tree directly (in case sha is already fetched)
+        try {
+            const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha], { cwd: projectRoot });
+            const lines = stdout.split('\n');
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                const parts = line.split(/\s+/);
+                if (parts.length >= 4) {
+                    const mode = parts[0];
+                    const filePath = parts[3];
+                    if (mode === '120000' && candidates.has(filePath)) {
+                        symlinks.add(filePath);
+                    }
+                }
+            }
+            console.log(`fetchSymlinkPaths: used local git (sha already present), found ${symlinks.size} symlinks`);
+            return symlinks;
+        } catch (e) {
+            // sha not found locally, try fetching
+            console.log(`fetchSymlinkPaths: sha ${sha} not found locally, attempting fetch...`);
+        }
         
-        // Get the tree with modes
+        // Fetch the commit (try fetching everything, as the server should have most refs already)
+        await execFileAsync('git', ['fetch', 'origin'], { cwd: projectRoot, timeout: 30000 });
+        
+        // Now try ls-tree again
         const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha], { cwd: projectRoot });
-        
-        // Parse output: each line is "mode type sha  path"
-        // Example: "120000 blob abc123  zdn/misc_text_tasks_work_2025/1/26592.js"
         const lines = stdout.split('\n');
         for (const line of lines) {
             if (!line.trim()) continue;
@@ -240,20 +259,20 @@ async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token) {
                 }
             }
         }
-        console.log(`fetchSymlinkPaths: used local git, found ${symlinks.size} symlinks`);
+        console.log(`fetchSymlinkPaths: used local git (after fetch), found ${symlinks.size} symlinks`);
         return symlinks;
     } catch (e) {
         console.warn(`fetchSymlinkPaths: local git failed (${e.message}), falling back to API`);
     }
     
     // Fallback to API
-    const headers = {
+    const apiHeaders = {
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'chas-ege-provide-examples-all-prs',
         'Authorization': `token ${token}`
     };
     try {
-        const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`, { headers });
+        const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`, { headers: apiHeaders });
         if (!resp.ok) {
             console.warn(`fetchSymlinkPaths: trees API responded ${resp.status}, not excluding anything`);
             return symlinks;
@@ -268,6 +287,7 @@ async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token) {
                 symlinks.add(entry.path);
             }
         }
+        console.log(`fetchSymlinkPaths: used API, found ${symlinks.size} symlinks`);
     } catch (e) {
         console.warn('fetchSymlinkPaths error:', e.message);
     }
