@@ -6,7 +6,7 @@ import os from 'os';
 import { execFile } from 'child_process';
 import util from 'util';
 import { fileURLToPath } from 'url';
-import { getFileContent } from './lib/github-api.mjs';
+import { getFileContent, fetchSymlinkPaths } from './lib/github-api.mjs';
 
 const execFileAsync = util.promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
