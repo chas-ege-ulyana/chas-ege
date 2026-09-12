@@ -248,3 +248,143 @@ export async function getFileContent(owner, repo, filePath, ref, token) {
     return null;
 }
 
+
+/**
+ * Определяет симлинки среди указанных путей, используя локальный git или GitHub API.
+ * @param {string} owner - Владелец репозитория.
+ * @param {string} repo - Название репозитория.
+ * @param {string} sha - SHA коммита для проверки.
+ * @param {Array<string>} candidatePaths - Пути файлов для проверки на симлинковость.
+ * @param {string} [token] - Токен GitHub (опционально, если не передан - пытается получить автоматически).
+ * @returns {Promise<Set<string>>} Set путей файлов, которые являются симлинками.
+ */
+export async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token = null) {
+    const symlinks = new Set();
+    const candidates = new Set(candidatePaths);
+    
+    // Try local git first to save API requests
+    try {
+        // First try ls-tree directly (in case sha is already fetched)
+        try {
+            const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha], { cwd: projectRoot });
+            const lines = stdout.split('\n');
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                const parts = line.split(/\s+/);
+                if (parts.length >= 4) {
+                    const mode = parts[0];
+                    const filePath = parts[3];
+                    if (mode === '120000' && candidates.has(filePath)) {
+                        symlinks.add(filePath);
+                    }
+                }
+            }
+            console.log(`[symlink-detect] Used local git (sha already present), found ${symlinks.size} symlinks`);
+            return symlinks;
+        } catch (e) {
+            console.log(`[symlink-detect] sha ${sha} not found locally, attempting fetch...`);
+        }
+        
+        // Fetch the commit
+        await execFileAsync('git', ['fetch', 'origin'], { cwd: projectRoot, timeout: 30000 });
+        
+        // Now try ls-tree again
+        const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha], { cwd: projectRoot });
+        const lines = stdout.split('\n');
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            const parts = line.split(/\s+/);
+            if (parts.length >= 4) {
+                const mode = parts[0];
+                const filePath = parts[3];
+                if (mode === '120000' && candidates.has(filePath)) {
+                    symlinks.add(filePath);
+                }
+            }
+        }
+        console.log(`[symlink-detect] Used local git (after fetch), found ${symlinks.size} symlinks`);
+        return symlinks;
+    } catch (e) {
+        console.warn(`[symlink-detect] Local git failed (${e.message}), falling back to API`);
+    }
+    
+    // Fallback to API
+    let apiToken = token;
+    if (!apiToken) {
+        apiToken = await getGitHubToken();
+    }
+    if (!apiToken) {
+        console.warn('[symlink-detect] No GitHub token available, cannot fallback to API');
+        return symlinks;
+    }
+    
+    const apiHeaders = {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'chas-ege-ci-scripts',
+        'Authorization': `token ${apiToken}`
+    };
+    try {
+        const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`, { headers: apiHeaders });
+        if (!resp.ok) {
+            console.warn(`[symlink-detect] Trees API responded ${resp.status}, not excluding anything`);
+            return symlinks;
+        }
+        const data = await resp.json();
+        if (data.truncated) {
+            console.warn('[symlink-detect] Recursive tree truncated, falling back to per-directory walk');
+            return await fetchSymlinkPathsPerDir(owner, repo, sha, candidatePaths, apiToken);
+        }
+        for (const entry of data.tree || []) {
+            if (entry.mode === '120000' && candidates.has(entry.path)) {
+                symlinks.add(entry.path);
+            }
+        }
+        console.log(`[symlink-detect] Used API, found ${symlinks.size} symlinks`);
+    } catch (e) {
+        console.warn('[symlink-detect] API error:', e.message);
+    }
+    return symlinks;
+}
+
+/**
+ * Вспомогательная функция для определения симлинков по директориям (fallback при truncated tree).
+ * @param {string} owner - Владелец репозитория.
+ * @param {string} repo - Название репозитория.
+ * @param {string} sha - SHA коммита.
+ * @param {Array<string>} candidatePaths - Пути файлов для проверки.
+ * @param {string} token - Токен GitHub.
+ * @returns {Promise<Set<string>>} Set путей симлинков.
+ */
+async function fetchSymlinkPathsPerDir(owner, repo, sha, candidatePaths, token) {
+    const symlinks = new Set();
+    const candidatesSet = new Set(candidatePaths);
+    const headers = {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'chas-ege-ci-scripts',
+        'Authorization': `token ${token}`
+    };
+    
+    const dirs = new Set();
+    for (const p of candidatePaths) {
+        const dir = p.substring(0, p.lastIndexOf('/'));
+        if (dir) dirs.add(dir);
+    }
+    
+    for (const dir of dirs) {
+        try {
+            const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${sha}:${dir}`, { headers });
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            for (const entry of data.tree || []) {
+                const fullPath = `${dir}/${entry.path}`;
+                if (entry.mode === '120000' && candidatesSet.has(fullPath)) {
+                    symlinks.add(fullPath);
+                }
+            }
+        } catch (e) {
+            console.warn(`[symlink-detect] fetchSymlinkPathsPerDir error for ${dir}:`, e.message);
+        }
+    }
+    return symlinks;
+}
+
