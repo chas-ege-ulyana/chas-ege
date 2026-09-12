@@ -217,6 +217,36 @@ async function runProvideScript(prNum, extraArgs) {
 async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token) {
     const symlinks = new Set();
     const candidates = new Set(candidatePaths);
+    
+    // Try local git first to save API requests
+    try {
+        // Fetch the specific commit
+        await execFileAsync('git', ['fetch', 'origin', sha], { cwd: projectRoot });
+        
+        // Get the tree with modes
+        const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha], { cwd: projectRoot });
+        
+        // Parse output: each line is "mode type sha  path"
+        // Example: "120000 blob abc123  zdn/misc_text_tasks_work_2025/1/26592.js"
+        const lines = stdout.split('\n');
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            const parts = line.split(/\s+/);
+            if (parts.length >= 4) {
+                const mode = parts[0];
+                const filePath = parts[3];
+                if (mode === '120000' && candidates.has(filePath)) {
+                    symlinks.add(filePath);
+                }
+            }
+        }
+        console.log(`fetchSymlinkPaths: used local git, found ${symlinks.size} symlinks`);
+        return symlinks;
+    } catch (e) {
+        console.warn(`fetchSymlinkPaths: local git failed (${e.message}), falling back to API`);
+    }
+    
+    // Fallback to API
     const headers = {
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'chas-ege-provide-examples-all-prs',
@@ -243,7 +273,6 @@ async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token) {
     }
     return symlinks;
 }
-
 async function fetchSymlinkPathsPerDir(owner, repo, sha, candidatePaths, token) {
     const symlinks = new Set();
     const candidatesSet = new Set(candidatePaths);
