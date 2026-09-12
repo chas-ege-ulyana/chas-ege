@@ -143,7 +143,7 @@ async function replaceBase64ImagesWithUploads(latexText, prNum, token, repositor
             const downloadUrl = await uploadImageViaUserAttachments(base64Data, mimeType, prNum, token, repositoryId);
             
             // Replace the commented img tag with markdown image
-            const imgMarkdown = `\n\n`;
+            const imgMarkdown = `\n\n![image](${downloadUrl})\n\n`;
             result = result.replace(fullMatch, imgMarkdown);
             console.log(`  -> Uploaded: ${downloadUrl}`);
         } catch (e) {
