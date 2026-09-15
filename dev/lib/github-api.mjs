@@ -271,7 +271,13 @@ export async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token 
     try {
         // First try ls-tree directly (in case sha is already fetched)
         try {
-            const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha]);
+            let args = ['ls-tree'];
+            if (candidatePaths.length > 0 && candidatePaths.length <= 100) {
+                args.push(sha, ...candidatePaths);
+            } else {
+                args.push('-r', sha);
+            }
+            const { stdout } = await execFileAsync('git', args, { maxBuffer: 1024 * 1024 * 50 });
             const lines = stdout.split('\n');
             for (const line of lines) {
                 if (!line.trim()) continue;
@@ -294,7 +300,13 @@ export async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token 
         await execFileAsync('git', ['fetch', 'origin'], { timeout: 30000 });
         
         // Now try ls-tree again
-        const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha]);
+        let args = ['ls-tree'];
+        if (candidatePaths.length > 0 && candidatePaths.length <= 100) {
+            args.push(sha, ...candidatePaths);
+        } else {
+            args.push('-r', sha);
+        }
+        const { stdout } = await execFileAsync('git', args, { maxBuffer: 1024 * 1024 * 50 });
         const lines = stdout.split('\n');
         for (const line of lines) {
             if (!line.trim()) continue;
