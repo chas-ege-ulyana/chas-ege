@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 const execFileAsync = util.promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, '..', '..');
+export const projectRoot = path.resolve(__dirname, '..', '..');
 
 /**
  * Получает токен GitHub из переменной окружения или через `gh auth token`.
@@ -271,7 +271,7 @@ export async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token 
     try {
         // First try ls-tree directly (in case sha is already fetched)
         try {
-            const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha], { cwd: projectRoot });
+            const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha]);
             const lines = stdout.split('\n');
             for (const line of lines) {
                 if (!line.trim()) continue;
@@ -291,10 +291,10 @@ export async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token 
         }
         
         // Fetch the commit
-        await execFileAsync('git', ['fetch', 'origin'], { cwd: projectRoot, timeout: 30000 });
+        await execFileAsync('git', ['fetch', 'origin'], { timeout: 30000 });
         
         // Now try ls-tree again
-        const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha], { cwd: projectRoot });
+        const { stdout } = await execFileAsync('git', ['ls-tree', '-r', sha]);
         const lines = stdout.split('\n');
         for (const line of lines) {
             if (!line.trim()) continue;
