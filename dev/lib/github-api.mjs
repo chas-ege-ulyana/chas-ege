@@ -1,7 +1,12 @@
 import { execFile } from 'child_process';
 import util from 'util';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const execFileAsync = util.promisify(execFile);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..', '..');
 
 /**
  * Получает токен GitHub из переменной окружения или через `gh auth token`.
@@ -282,7 +287,7 @@ export async function fetchSymlinkPaths(owner, repo, sha, candidatePaths, token 
             console.log(`[symlink-detect] Used local git (sha already present), found ${symlinks.size} symlinks`);
             return symlinks;
         } catch (e) {
-            console.log(`[symlink-detect] sha ${sha} not found locally, attempting fetch...`);
+            console.log(`[symlink-detect] sha ${sha} not found locally (${e.message}), attempting fetch...`);
         }
         
         // Fetch the commit
