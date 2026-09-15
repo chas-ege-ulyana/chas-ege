@@ -6,12 +6,12 @@ import os from 'os';
 import { execFile } from 'child_process';
 import util from 'util';
 import { fileURLToPath } from 'url';
-import { getFileContent, fetchSymlinkPaths } from './lib/github-api.mjs';
+import { getFileContent, fetchSymlinkPaths, projectRoot } from './lib/github-api.mjs';
 
 const execFileAsync = util.promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, '..');
+// projectRoot is imported from ./lib/github-api.mjs
 
 const args = process.argv.slice(2);
 const editLastFlag = args.includes('--edit-last');
