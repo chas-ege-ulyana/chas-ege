@@ -202,6 +202,7 @@ async function checkDevelCommits(token) {
 async function runProvideScript(prNum, extraArgs) {
     const scriptPath = path.join(projectRoot, 'dev', 'provide_examples_to_PR.mjs');
     const scriptArgs = [scriptPath, prNum.toString(), ...extraArgs];
+    const runStart = Date.now();
     try {
         const { stdout, stderr } = await execFileAsync('node', scriptArgs, { maxBuffer: 1024 * 1024 * 50 });
         if (stderr) console.warn(`stderr from provide_examples_to_PR.mjs:\n${stderr}`);
@@ -211,12 +212,18 @@ async function runProvideScript(prNum, extraArgs) {
         if (error.stderr) console.error(`stderr: ${error.stderr}`);
         if (error.stdout) console.log(error.stdout);
     }
+    const elapsed = Date.now() - runStart;
+    console.log(`⏱️  Время генерации для PR #${prNum}: ${(elapsed / 1000).toFixed(2)} с`);
+    return elapsed;
 }
 
 
 
 
 async function main() {
+    const scriptStartTime = Date.now();
+    let totalGenerationTime = 0;
+
     console.log('Starting script to process all PRs...');
     const token = await getGitHubToken();
     if (!token) {
@@ -281,7 +288,7 @@ async function main() {
 
                 if (exampleComments.length === 0) {
                     console.log(`PR #${pr.number} has no ПРИМЕРЫ_ЗАДАЧ comment. Generating examples.`);
-                    await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
+                    totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                     continue;
                 }
 
@@ -290,7 +297,7 @@ async function main() {
                 const match = commentBody.match(/ПРИМЕРЫ_ЗАДАЧ\s+([^\s]+)\s+([0-9a-f]+)\s+сборка\s+([0-9a-f]+)/);
                 if (!match) {
                     console.log(`Could not parse ПРИМЕРЫ_ЗАДАЧ comment in PR #${pr.number}. Generating.`);
-                    await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
+                    totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                     continue;
                 }
 
@@ -323,9 +330,9 @@ async function main() {
                             
                             if (shouldEditLast) {
                                 console.log(`Editing last comment for PR #${pr.number}`);
-                                await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir, '--edit-last']);
+                                totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir, '--edit-last']);
                             } else {
-                                await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
+                                totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                             }
                             continue;
                         }
@@ -333,7 +340,7 @@ async function main() {
                         const errorText = await compareResp.text();
                         console.log(`Failed to compare commits. Status: ${compareResp.status} ${compareResp.statusText}. Response: ${errorText.substring(0, 500)}`);
                         console.log(`Debug: buildCommit=${buildCommit}, currentGitStatus=${currentGitStatus}`);
-                        await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
+                        totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                         continue;
                     }
                 }
@@ -349,7 +356,7 @@ async function main() {
 
                 if (currentFileContent !== oldFileContent) {
                     console.log(`File ${commentedFile} differs. Generating.`);
-                    await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
+                    totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                 } else {
                     console.log(`File ${commentedFile} is identical. Skipping.`);
                 }
@@ -367,6 +374,13 @@ async function main() {
             console.warn(`Failed to clean up temporary directory: ${e.message}`);
         }
     }
+
+    const totalScriptTime = Date.now() - scriptStartTime;
+    console.log('\n==========================================');
+    console.log(`⏱️  Суммарное время генерации задач: ${(totalGenerationTime / 1000).toFixed(2)} с`);
+    console.log(`⏱️  Полное время работы скрипта:       ${(totalScriptTime / 1000).toFixed(2)} с`);
+    console.log(`⏱️  Разница (API и прочие накладные):  ${((totalScriptTime - totalGenerationTime) / 1000).toFixed(2)} с`);
+    console.log('==========================================');
 }
 
 main();
