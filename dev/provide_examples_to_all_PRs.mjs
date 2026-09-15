@@ -272,11 +272,6 @@ async function main() {
                     return /^zdn\/[^\/]+\/[^\/]+\/[^\/]+\.js$/.test(f.filename);
                 });
                 
-                if (validFiles.length < 1 || validFiles.length > 10) {
-                    console.log(`PR #${pr.number} has ${validFiles.length} valid zdn/*/*/*.js files initially. Skipping.`);
-                    continue;
-                }
-
                 const symlinkPaths = await fetchSymlinkPaths(owner, repo, pr.head.sha, validFiles.map(f => f.filename), token);
                 if (symlinkPaths.size > 0) {
                     console.log(`Excluding symlinks from file count: ${[...symlinkPaths].join(', ')}`);
@@ -284,7 +279,7 @@ async function main() {
                 validFiles = validFiles.filter(f => !symlinkPaths.has(f.filename));
 
                 if (validFiles.length < 1 || validFiles.length > 4) {
-                    console.log(`PR #${pr.number} has ${validFiles.length} valid non-symlink files after filtering. Skipping.`);
+                    console.log(`PR #${pr.number} has ${validFiles.length} valid zdn/*/*/*.js files. Skipping.`);
                     continue;
                 }
 
