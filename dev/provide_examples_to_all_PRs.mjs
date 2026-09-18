@@ -182,39 +182,30 @@ async function isLastCommentInPR(issueComments, reviewComments, targetCommentId)
 }
 
 async function checkDevelCommits(token) {
-    const url = `https://api.github.com/repos/${owner}/${repo}/commits?sha=devel&per_page=50`;
-    const response = await fetch(url, {
-        headers: {
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'chas-ege-provide-examples-all-prs',
-            ...(token && { 'Authorization': `token ${token}` })
-        }
-    });
-    if (!response.ok) return false;
-    const commits = await response.json();
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    
-    for (const commit of commits) {
-        const commitDate = new Date(commit.commit.committer.date);
-        if (commitDate < twoHoursAgo) break;
+    try {
+        // Проверяем коммиты за последние 2 часа локально через git (без API-запросов)
+        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+        const since = twoHoursAgo.toISOString();
         
-        const cResp = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/${commit.sha}`, {
-            headers: {
-                'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'chas-ege-provide-examples-all-prs',
-                'Authorization': `token ${token}`
-            }
-        });
-        if (!cResp.ok) continue;
-        const cData = await cResp.json();
-        const commitFiles = cData.files || [];
-        const hasNonZdnMdDoc = commitFiles.some(file => {
-            const p = file.filename;
+        const { stdout } = await execFileAsync('git', [
+            'log',
+            '--name-only',
+            '--pretty=format:',
+            `--since=${since}`,
+            'devel'
+        ], { cwd: projectRoot });
+        
+        const files = stdout.trim().split('\n').filter(f => f.trim().length > 0);
+        const hasNonZdnMdDoc = files.some(file => {
+            const p = file.trim();
             return !p.startsWith('zdn/') && !p.startsWith('md/') && !p.startsWith('doc/');
         });
-        if (hasNonZdnMdDoc) return true;
+        
+        return hasNonZdnMdDoc;
+    } catch (e) {
+        console.warn('Failed to check devel commits locally:', e.message);
+        return false;
     }
-    return false;
 }
 
 async function runProvideScript(prNum, extraArgs) {
