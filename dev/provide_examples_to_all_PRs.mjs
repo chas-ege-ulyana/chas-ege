@@ -181,7 +181,7 @@ async function isLastCommentInPR(issueComments, reviewComments, targetCommentId)
     return allComments[allComments.length - 1].id === targetCommentId;
 }
 
-async function checkDevelCommits(token) {
+async function checkDevelCommits() {
     try {
         // Проверяем коммиты за последние 2 часа локально через git (без API-запросов)
         const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -253,7 +253,7 @@ async function main() {
 
     let fatalError = null;
     try {
-        const recentDevelCommits = await checkDevelCommits(token);
+        const recentDevelCommits = await checkDevelCommits();
         console.log(`Recent non-zdn/md/doc devel commits: ${recentDevelCommits}`);
 
         let prs = await fetchAllOpenPRs(token);
