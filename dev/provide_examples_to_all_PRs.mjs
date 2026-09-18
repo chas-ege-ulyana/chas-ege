@@ -403,16 +403,34 @@ async function main() {
                     }
                 }
 
-                const currentFileContent = await getFileContent(owner, repo, commentedFile, pr.head.sha, token);
-                const oldFileContent = await getFileContent(owner, repo, commentedFile, commitHash, token);
-                
                 console.log(`[DEBUG] PR #${pr.number}: commentedFile=${commentedFile}`);
                 console.log(`[DEBUG] PR #${pr.number}: pr.head.sha=${pr.head.sha}`);
                 console.log(`[DEBUG] PR #${pr.number}: commitHash=${commitHash}`);
-                console.log(`[DEBUG] PR #${pr.number}: currentFileContent length=${currentFileContent ? currentFileContent.length : 'null'}`);
-                console.log(`[DEBUG] PR #${pr.number}: oldFileContent length=${oldFileContent ? oldFileContent.length : 'null'}`);
 
-                if (currentFileContent !== oldFileContent) {
+                let filesDiffer = false;
+                try {
+                    console.log(`[DEBUG] PR #${pr.number}: Running git diff ${commitHash} ${pr.head.sha} -- ${commentedFile}`);
+                    const { stdout } = await execFileAsync('git', ['diff', '--no-ext-diff', commitHash, pr.head.sha, '--', commentedFile], { cwd: projectRoot });
+                    if (stdout.trim() !== '') {
+                        filesDiffer = true;
+                        console.log(`[DEBUG] PR #${pr.number}: git diff found differences.`);
+                    } else {
+                        console.log(`[DEBUG] PR #${pr.number}: git diff output is empty, files are identical.`);
+                    }
+                } catch (gitError) {
+                    console.warn(`[DEBUG] PR #${pr.number}: git diff failed: ${gitError.message}. Falling back to content comparison.`);
+                    // Фоллбэк на старый метод
+                    const currentFileContent = await getFileContent(owner, repo, commentedFile, pr.head.sha, token);
+                    const oldFileContent = await getFileContent(owner, repo, commentedFile, commitHash, token);
+                    console.log(`[DEBUG] PR #${pr.number}: currentFileContent length=${currentFileContent ? currentFileContent.length : 'null'}`);
+                    console.log(`[DEBUG] PR #${pr.number}: oldFileContent length=${oldFileContent ? oldFileContent.length : 'null'}`);
+
+                    if (currentFileContent !== oldFileContent) {
+                        filesDiffer = true;
+                    }
+                }
+
+                if (filesDiffer) {
                     console.log(`File ${commentedFile} differs. Generating.`);
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                 } else {
