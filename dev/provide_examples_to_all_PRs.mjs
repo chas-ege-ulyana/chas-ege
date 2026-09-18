@@ -31,6 +31,24 @@ async function getGitHubToken() {
     }
 }
 
+
+async function getRateLimit(token) {
+    try {
+        const response = await fetch('https://api.github.com/rate_limit', {
+            headers: {
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'chas-ege-provide-examples-all-prs',
+                ...(token && { 'Authorization': `token ${token}` })
+            }
+        });
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data.resources.core;
+    } catch (e) {
+        return null;
+    }
+}
+
 async function fetchAllOpenPRs(token) {
     let allPRs = [];
     let url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`;
@@ -231,10 +249,18 @@ async function main() {
         process.exit(1);
     }
 
+    const startRateLimit = await getRateLimit(token);
+    if (startRateLimit) {
+        console.log(`🚦 Rate limit at start: ${startRateLimit.remaining} / ${startRateLimit.limit} (сброс в ${new Date(startRateLimit.reset * 1000).toLocaleString()})`);
+    } else {
+        console.warn('🚦 Не удалось получить rate limit на старте.');
+    }
+
     // Создаём уникальную временную директорию для профилей Chromium на весь прогон
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taskexamples-'));
     console.log(`Created temporary user data directory: ${userDataDir}`);
 
+    let fatalError = null;
     try {
         const recentDevelCommits = await checkDevelCommits(token);
         console.log(`Recent non-zdn/md/doc devel commits: ${recentDevelCommits}`);
@@ -365,7 +391,16 @@ async function main() {
                 console.error(`Error processing PR #${pr.number}:`, e.message);
             }
         }
+    } catch (e) {
+        fatalError = e;
     } finally {
+        const endRateLimit = await getRateLimit(token);
+        if (endRateLimit) {
+            console.log(`🚦 Rate limit at end: ${endRateLimit.remaining} / ${endRateLimit.limit} (сброс в ${new Date(endRateLimit.reset * 1000).toLocaleString()})`);
+        } else {
+            console.warn('🚦 Не удалось получить rate limit в конце.');
+        }
+
         // Удаляем временную директорию в конце
         try {
             fs.rmSync(userDataDir, { recursive: true, force: true });
@@ -381,6 +416,11 @@ async function main() {
     console.log(`⏱️  Полное время работы скрипта:       ${(totalScriptTime / 1000).toFixed(2)} с`);
     console.log(`⏱️  Разница (API и прочие накладные):  ${((totalScriptTime - totalGenerationTime) / 1000).toFixed(2)} с`);
     console.log('==========================================');
+    
+    if (fatalError) {
+        console.error('Fatal error in main:', fatalError.message);
+        process.exit(1);
+    }
 }
 
 main();
