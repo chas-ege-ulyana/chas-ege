@@ -3,7 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFile } from 'child_process';
+import { execFile, execSync } from 'child_process';
 import util from 'util';
 import { fileURLToPath } from 'url';
 import { getFileContent, fetchSymlinkPaths, projectRoot } from './lib/github-api.mjs';
@@ -263,6 +263,7 @@ async function main() {
             prs.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
         }
 
+
         let currentGitStatus = 'unknown';
         try {
             const gitStatusPath = path.join(projectRoot, 'dist', 'gitstatus.txt');
@@ -272,11 +273,41 @@ async function main() {
             console.warn('Could not read dist/gitstatus.txt:', e.message);
         }
 
+        const cacheFilePath = path.join(projectRoot, '.examples-generated.cache');
+        let cache = new Set();
+        if (fs.existsSync(cacheFilePath)) {
+            const content = fs.readFileSync(cacheFilePath, 'utf8');
+            cache = new Set(content.split('\n').filter(Boolean));
+            console.log(`Loaded ${cache.size} entries from cache.`);
+        }
+
+        // Фетчим только открытые PR, чтобы не тянуть тысячи закрытых
+        console.log(`🚀 Fetching ${prs.length} open PR refs from upstream...`);
+        const refspecs = prs.map(pr => `+refs/pull/${pr.number}/head:refs/remotes/upstream/pr/${pr.number}`);
+        for (let i = 0; i < refspecs.length; i += 100) {
+            const batch = refspecs.slice(i, i + 100);
+            try {
+                execSync(`git fetch upstream ${batch.join(' ')}`, { stdio: 'inherit', timeout: 120000 });
+            } catch (e) {
+                console.warn(`Fetch batch failed: ${e.message}`);
+            }
+        }
+
+
         for (const pr of prs) {
             if (currentGitStatus === 'unknown') {
                 console.log(`⚠️ Current git status is unknown. Skipping PR #${pr.number} to avoid infinite regeneration.`);
                 continue;
             }
+
+            const prHeadSha = pr.head.sha;
+            const cacheKey = `${prHeadSha}:${currentGitStatus}`;
+
+            if (cache.has(cacheKey)) {
+                console.log(`🎉 PR #${pr.number} уже проверен для текущих хэшей (pr=${prHeadSha.slice(0,7)}, devel=${currentGitStatus.slice(0,7)}). Пропускаем!`);
+                continue;
+            }
+
             console.log(`\n--- Checking PR #${pr.number} ---`);
             try {
                 const files = await fetchAllPRFiles(pr.number, token);
@@ -297,6 +328,10 @@ async function main() {
 
                 if (validFiles.length < 1 || validFiles.length > 4) {
                     console.log(`PR #${pr.number} has ${validFiles.length} valid zdn/*/*/*.js files. Skipping.`);
+                    cache.add(cacheKey);
+                    fs.appendFileSync(cacheFilePath, cacheKey + '\n');
+                    cache.add(cacheKey);
+                    fs.appendFileSync(cacheFilePath, cacheKey + '\n');
                     continue;
                 }
 
@@ -306,6 +341,8 @@ async function main() {
                 if (exampleComments.length === 0) {
                     console.log(`PR #${pr.number} has no ПРИМЕРЫ_ЗАДАЧ comment. Generating examples.`);
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
+                    cache.add(cacheKey);
+                    fs.appendFileSync(cacheFilePath, cacheKey + '\n');
                     continue;
                 }
 
@@ -351,6 +388,8 @@ async function main() {
                             } else {
                                 totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                             }
+                            cache.add(cacheKey);
+                            fs.appendFileSync(cacheFilePath, cacheKey + '\n');
                             continue;
                         }
                     } else {
@@ -358,6 +397,8 @@ async function main() {
                         console.log(`Failed to compare commits. Status: ${compareResp.status} ${compareResp.statusText}. Response: ${errorText.substring(0, 500)}`);
                         console.log(`Debug: buildCommit=${buildCommit}, currentGitStatus=${currentGitStatus}`);
                         totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
+                        cache.add(cacheKey);
+                        fs.appendFileSync(cacheFilePath, cacheKey + '\n');
                         continue;
                     }
                 }
@@ -377,6 +418,8 @@ async function main() {
                 } else {
                     console.log(`File ${commentedFile} is identical. Skipping.`);
                 }
+                cache.add(cacheKey);
+                fs.appendFileSync(cacheFilePath, cacheKey + '\n');
 
             } catch (e) {
                 console.error(`Error processing PR #${pr.number}:`, e.message);
