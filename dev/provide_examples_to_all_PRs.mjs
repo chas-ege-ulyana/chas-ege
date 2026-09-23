@@ -53,8 +53,8 @@ async function handlePRWithExamples(pr, token) {
     console.log(`🔍 Обработка PR #${pr.number} (примеры уже есть)`);
     
     // Заглушка: пропускаем PR с номером меньше 3400
-    if (pr.number < 3400) {
-        console.log(`⏭️  PR #${pr.number} < 3400, пропускаем (заглушка)`);
+    if (pr.number < 3300) {
+        console.log(`⏭️  PR #${pr.number} < 3300, пропускаем (заглушка)`);
         return;
     }
     
