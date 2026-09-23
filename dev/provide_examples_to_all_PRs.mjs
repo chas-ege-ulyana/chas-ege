@@ -49,6 +49,12 @@ async function getRateLimit(token) {
     }
 }
 
+function handlePRWithExamples(pr, token) {
+    console.log(`🚧 [Заглушка] Обработка PR #${pr.number}, у которого примеры уже есть.`);
+    console.log(`🚧 [Заглушка] TODO: Назначить ревьюера.`);
+    console.log(`🚧 [Заглушка] TODO: Проверить метки и выполнить прочие действия.`);
+}
+
 async function fetchAllOpenPRs(token) {
     let allPRs = [];
     let url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`;
@@ -273,12 +279,20 @@ async function main() {
             console.warn('Could not read dist/gitstatus.txt:', e.message);
         }
 
-        const cacheFilePath = path.join(projectRoot, '.examples-generated.cache');
-        let cache = new Set();
-        if (fs.existsSync(cacheFilePath)) {
-            const content = fs.readFileSync(cacheFilePath, 'utf8');
-            cache = new Set(content.split('\n').filter(Boolean));
-            console.log(`Loaded ${cache.size} entries from cache.`);
+        const noExamplesNeededCacheFilePath = path.join(projectRoot, '.no-examples-needed.cache');
+        let noExamplesNeededCache = new Set();
+        if (fs.existsSync(noExamplesNeededCacheFilePath)) {
+            const content = fs.readFileSync(noExamplesNeededCacheFilePath, 'utf8');
+            noExamplesNeededCache = new Set(content.split('\n').filter(Boolean));
+            console.log(`Loaded ${noExamplesNeededCache.size} entries from no-examples-needed cache.`);
+        }
+
+        const generatedExamplesCacheFilePath = path.join(projectRoot, '.generated-examples.cache');
+        let generatedExamplesCache = new Set();
+        if (fs.existsSync(generatedExamplesCacheFilePath)) {
+            const content = fs.readFileSync(generatedExamplesCacheFilePath, 'utf8');
+            generatedExamplesCache = new Set(content.split('\n').filter(Boolean));
+            console.log(`Loaded ${generatedExamplesCache.size} entries from generated-examples cache.`);
         }
 
         // Фетчим только открытые PR, чтобы не тянуть тысячи закрытых
@@ -303,8 +317,14 @@ async function main() {
             const prHeadSha = pr.head.sha;
             const cacheKey = `${prHeadSha}:${currentGitStatus}`;
 
-            if (cache.has(cacheKey)) {
-                console.log(`🎉 PR #${pr.number} уже проверен для текущих хэшей (pr=${prHeadSha.slice(0,7)}, devel=${currentGitStatus.slice(0,7)}). Пропускаем!`);
+            if (noExamplesNeededCache.has(cacheKey)) {
+                console.log(`🎉 PR #${pr.number} уже проверен для текущих хэшей (примеры не нужны). Пропускаем!`);
+                continue;
+            }
+
+            if (generatedExamplesCache.has(cacheKey)) {
+                console.log(`🎉 PR #${pr.number} уже проверен для текущих хэшей (примеры сгенерированы). Переходим к заглушке.`);
+                handlePRWithExamples(pr, token);
                 continue;
             }
 
@@ -328,10 +348,8 @@ async function main() {
 
                 if (validFiles.length < 1 || validFiles.length > 4) {
                     console.log(`PR #${pr.number} has ${validFiles.length} valid zdn/*/*/*.js files. Skipping.`);
-                    cache.add(cacheKey);
-                    fs.appendFileSync(cacheFilePath, cacheKey + '\n');
-                    cache.add(cacheKey);
-                    fs.appendFileSync(cacheFilePath, cacheKey + '\n');
+                    noExamplesNeededCache.add(cacheKey);
+                    fs.appendFileSync(noExamplesNeededCacheFilePath, cacheKey + '\n');
                     continue;
                 }
 
@@ -341,8 +359,9 @@ async function main() {
                 if (exampleComments.length === 0) {
                     console.log(`PR #${pr.number} has no ПРИМЕРЫ_ЗАДАЧ comment. Generating examples.`);
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
-                    cache.add(cacheKey);
-                    fs.appendFileSync(cacheFilePath, cacheKey + '\n');
+                    generatedExamplesCache.add(cacheKey);
+                    fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
+                    handlePRWithExamples(pr, token);
                     continue;
                 }
 
@@ -352,6 +371,9 @@ async function main() {
                 if (!match) {
                     console.log(`Could not parse ПРИМЕРЫ_ЗАДАЧ comment in PR #${pr.number}. Generating.`);
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
+                    generatedExamplesCache.add(cacheKey);
+                    fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
+                    handlePRWithExamples(pr, token);
                     continue;
                 }
 
@@ -388,8 +410,9 @@ async function main() {
                             } else {
                                 totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                             }
-                            cache.add(cacheKey);
-                            fs.appendFileSync(cacheFilePath, cacheKey + '\n');
+                            generatedExamplesCache.add(cacheKey);
+                            fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
+                            handlePRWithExamples(pr, token);
                             continue;
                         }
                     } else {
@@ -397,8 +420,9 @@ async function main() {
                         console.log(`Failed to compare commits. Status: ${compareResp.status} ${compareResp.statusText}. Response: ${errorText.substring(0, 500)}`);
                         console.log(`Debug: buildCommit=${buildCommit}, currentGitStatus=${currentGitStatus}`);
                         totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
-                        cache.add(cacheKey);
-                        fs.appendFileSync(cacheFilePath, cacheKey + '\n');
+                        generatedExamplesCache.add(cacheKey);
+                        fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
+                        handlePRWithExamples(pr, token);
                         continue;
                     }
                 }
@@ -433,11 +457,15 @@ async function main() {
                 if (filesDiffer) {
                     console.log(`File ${commentedFile} differs. Generating.`);
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
+                    generatedExamplesCache.add(cacheKey);
+                    fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
+                    handlePRWithExamples(pr, token);
                 } else {
-                    console.log(`File ${commentedFile} is identical. Skipping.`);
+                    console.log(`File ${commentedFile} is identical. Skipping generation, but handling as generated.`);
+                    generatedExamplesCache.add(cacheKey);
+                    fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
+                    handlePRWithExamples(pr, token);
                 }
-                cache.add(cacheKey);
-                fs.appendFileSync(cacheFilePath, cacheKey + '\n');
 
             } catch (e) {
                 console.error(`Error processing PR #${pr.number}:`, e.message);
