@@ -119,6 +119,7 @@ ${'='.repeat(80)}
             console.error('stderr:', error.stderr);
         }
     }
+}
 
 async function fetchAllOpenPRs(token) {
     let allPRs = [];
