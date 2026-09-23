@@ -49,8 +49,77 @@ async function getRateLimit(token) {
     }
 }
 
-function handlePRWithExamples(pr, token) {
-    console.log(`🚧 [Заглушка] Обработка PR #${pr.number}, у которого примеры уже есть.`);
+async function await handlePRWithExamples(pr, token) {
+    console.log(`🔍 Обработка PR #${pr.number} (примеры уже есть)`);
+    
+    // Заглушка: пропускаем PR с номером меньше 3400
+    if (pr.number < 3400) {
+        console.log(`⏭️  PR #${pr.number} < 3400, пропускаем (заглушка)`);
+        return;
+    }
+    
+    try {
+        // Получаем все комментарии в PR
+        const comments = await fetchPRComments(pr.number, token);
+        
+        // Фильтруем комментарии от Марты
+        const martaComments = comments.filter(c => c.user && c.user.login === 'chas-ege-marta');
+        
+        // Фильтруем комментарии с ПРИМЕРЫ_ЗАДАЧ
+        const exampleComments = comments.filter(c => c.body.includes('ПРИМЕРЫ_ЗАДАЧ'));
+        
+        // Проверяем второе условие
+        if (martaComments.length > 0 && exampleComments.length > 0) {
+            // Сортируем по дате и берем последние
+            const lastMartaComment = martaComments.sort((a, b) => 
+                new Date(b.created_at) - new Date(a.created_at)
+            )[0];
+            
+            const lastExampleComment = exampleComments.sort((a, b) => 
+                new Date(b.created_at) - new Date(a.created_at)
+            )[0];
+            
+            const martaDate = new Date(lastMartaComment.created_at);
+            const exampleDate = new Date(lastExampleComment.created_at);
+            
+            if (martaDate > exampleDate) {
+                console.log(`⏭️  PR #${pr.number}: Марта уже ответила после примеров, пропускаем`);
+                return;
+            }
+        }
+        
+        // Иначе запускаем bash-скрипт
+        console.log(`🚀 PR #${pr.number}: Запускаем ask_Marta_to_review.sh`);
+        const scriptPath = path.join(projectRoot, 'dev', 'ask_Marta_to_review.sh');
+        
+        const { stdout, stderr } = await execFileAsync('bash', [scriptPath, pr.number.toString()], {
+            cwd: projectRoot,
+            maxBuffer: 1024 * 1024 * 10
+        });
+        
+        if (stderr) {
+            console.warn(`stderr from ask_Marta_to_review.sh:
+${stderr}`);
+        }
+        
+        // Записываем вывод в marta.log
+        const logPath = path.join(projectRoot, 'marta.log');
+        const logEntry = `[${new Date().toISOString()}] PR #${pr.number}
+${stdout}
+${stderr ? 'STDERR: ' + stderr : ''}
+${'='.repeat(80)}
+`;
+        fs.appendFileSync(logPath, logEntry);
+        
+        console.log(`✅ PR #${pr.number}: ask_Marta_to_review.sh выполнен успешно`);
+        
+    } catch (error) {
+        console.error(`❌ PR #${pr.number}: Ошибка при обработке:`, error.message);
+        if (error.stderr) {
+            console.error('stderr:', error.stderr);
+        }
+    }
+}, у которого примеры уже есть.`);
     console.log(`🚧 [Заглушка] TODO: Назначить ревьюера.`);
     console.log(`🚧 [Заглушка] TODO: Проверить метки и выполнить прочие действия.`);
 }
@@ -324,7 +393,7 @@ async function main() {
 
             if (generatedExamplesCache.has(cacheKey)) {
                 console.log(`🎉 PR #${pr.number} уже проверен для текущих хэшей (примеры сгенерированы). Переходим к заглушке.`);
-                handlePRWithExamples(pr, token);
+                await handlePRWithExamples(pr, token);
                 continue;
             }
 
@@ -361,7 +430,7 @@ async function main() {
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                     generatedExamplesCache.add(cacheKey);
                     fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                    handlePRWithExamples(pr, token);
+                    await handlePRWithExamples(pr, token);
                     continue;
                 }
 
@@ -373,7 +442,7 @@ async function main() {
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                     generatedExamplesCache.add(cacheKey);
                     fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                    handlePRWithExamples(pr, token);
+                    await handlePRWithExamples(pr, token);
                     continue;
                 }
 
@@ -412,7 +481,7 @@ async function main() {
                             }
                             generatedExamplesCache.add(cacheKey);
                             fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                            handlePRWithExamples(pr, token);
+                            await handlePRWithExamples(pr, token);
                             continue;
                         }
                     } else {
@@ -422,7 +491,7 @@ async function main() {
                         totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                         generatedExamplesCache.add(cacheKey);
                         fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                        handlePRWithExamples(pr, token);
+                        await handlePRWithExamples(pr, token);
                         continue;
                     }
                 }
@@ -459,12 +528,12 @@ async function main() {
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                     generatedExamplesCache.add(cacheKey);
                     fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                    handlePRWithExamples(pr, token);
+                    await handlePRWithExamples(pr, token);
                 } else {
                     console.log(`File ${commentedFile} is identical. Skipping generation, but handling as generated.`);
                     generatedExamplesCache.add(cacheKey);
                     fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                    handlePRWithExamples(pr, token);
+                    await handlePRWithExamples(pr, token);
                 }
 
             } catch (e) {
