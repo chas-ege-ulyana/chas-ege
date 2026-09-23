@@ -66,7 +66,11 @@ async function handlePRWithExamples(pr, token) {
         const martaComments = comments.filter(c => c.user && c.user.login === 'chas-ege-marta');
         
         // Фильтруем комментарии с ПРИМЕРЫ_ЗАДАЧ
-        const exampleComments = comments.filter(c => c.body.includes('ПРИМЕРЫ_ЗАДАЧ'));
+        const exampleComments = comments.filter(c => 
+            c.body.includes('ПРИМЕРЫ_ЗАДАЧ') && 
+            c.user && 
+            c.user.login !== 'chas-ege-marta'
+        );
         
         // Проверяем второе условие
         if (martaComments.length > 0 && exampleComments.length > 0) {
@@ -420,7 +424,11 @@ async function main() {
                 }
 
                 const comments = await fetchPRComments(pr.number, token);
-                const exampleComments = comments.filter(c => c.body.includes('ПРИМЕРЫ_ЗАДАЧ'));
+                const exampleComments = comments.filter(c => 
+            c.body.includes('ПРИМЕРЫ_ЗАДАЧ') && 
+            c.user && 
+            c.user.login !== 'chas-ege-marta'
+        );
 
                 if (exampleComments.length === 0) {
                     console.log(`PR #${pr.number} has no ПРИМЕРЫ_ЗАДАЧ comment. Generating examples.`);
