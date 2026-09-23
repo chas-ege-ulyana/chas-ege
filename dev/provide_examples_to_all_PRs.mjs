@@ -49,7 +49,7 @@ async function getRateLimit(token) {
     }
 }
 
-async function await handlePRWithExamples(pr, token) {
+async function handlePRWithExamples(pr, token) {
     console.log(`🔍 Обработка PR #${pr.number} (примеры уже есть)`);
     
     // Заглушка: пропускаем PR с номером меньше 3400
