@@ -119,10 +119,6 @@ ${'='.repeat(80)}
             console.error('stderr:', error.stderr);
         }
     }
-}, у которого примеры уже есть.`);
-    console.log(`🚧 [Заглушка] TODO: Назначить ревьюера.`);
-    console.log(`🚧 [Заглушка] TODO: Проверить метки и выполнить прочие действия.`);
-}
 
 async function fetchAllOpenPRs(token) {
     let allPRs = [];
