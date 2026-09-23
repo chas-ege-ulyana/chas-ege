@@ -3,6 +3,7 @@
 echo "Asking Marta to review PR#$1 ..."
 
 /usr/local/bin/node dev/type-and-submit.mjs \
+  --headless \
   --executable=/snap/bin/chromium \
   --profile="../chas-ege-chromium-profiles/marta-auto" \
   --url="https://chat.qwen.ai" \
