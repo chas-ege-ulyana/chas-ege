@@ -299,5 +299,21 @@ try {
   if (logStream) {
     logStream.end();
   }
+  // Более корректное закрытие браузера для сохранения данных профиля (cookies и т.д.)
+  try {
+    // Закрываем все открытые страницы
+    const pages = await browser.pages();
+    for (const p of pages) {
+      try {
+        await p.close();
+      } catch (e) {
+        // Игнорируем ошибки при закрытии отдельных страниц
+      }
+    }
+    // Даём Chromium время на завершение внутренних операций и сохранение cookies
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  } catch (e) {
+    // Если не получилось закрыть страницы, всё равно пробуем закрыть браузер
+  }
   await browser.close();
 }
