@@ -24,6 +24,8 @@ function toBool(value) {
 
 const args = parseArgs(process.argv.slice(2));
 
+const checkAuthDomain = typeof args['check-auth'] === 'string' ? args['check-auth'] : null;
+
 if (args.help) {
   console.log(`
 Использование:
@@ -63,6 +65,9 @@ if (args.help) {
   --eval-file=...           То же самое, но код читается из файла.
   --eval-delay=250          Пауза после выполнения произвольного кода, мс.
                             Полезно, если код запускает асинхронные операции.
+  --check-auth=...          Проверить статус авторизации для указанного домена.
+                            Пример: --check-auth=chat.qwen.ai
+                            Логирует наличие cookies и признаки авторизации.
 `);
   process.exit(0);
 }
@@ -126,6 +131,91 @@ function log(message, data = null) {
     console.log(output);
   }
 }
+
+// Функция проверки статуса авторизации для конкретного домена
+async function checkAuthStatus(page, domain) {
+  log('Checking authentication status for domain:', { domain });
+  
+  try {
+    // Получаем все cookies для домена
+    const cookies = await page.cookies(`https://${domain}`);
+    
+    log('Cookies found:', { 
+      count: cookies.length,
+      names: cookies.map(c => c.name)
+    });
+    
+    if (cookies.length === 0) {
+      log('WARNING: No cookies found for domain - browser likely logged out', { domain });
+    }
+    
+    // Проверяем наличие типичных auth cookies
+    const authCookiePatterns = ['session', 'token', 'auth', 'next-auth', 'jwt'];
+    const foundAuthCookies = cookies.filter(c => 
+      authCookiePatterns.some(pattern => c.name.toLowerCase().includes(pattern))
+    );
+    
+    if (foundAuthCookies.length === 0 && cookies.length > 0) {
+      log('INFO: No authentication cookies found among existing cookies', { 
+        domain,
+        searchedPatterns: authCookiePatterns,
+        allCookies: cookies.map(c => ({ name: c.name, expires: c.expires }))
+      });
+    } else if (foundAuthCookies.length > 0) {
+      log('Authentication cookies found', { 
+        domain,
+        authCookies: foundAuthCookies.map(c => ({ name: c.name, expires: c.expires }))
+      });
+    }
+    
+    // Проверяем DOM на признаки авторизации
+    const authStatus = await page.evaluate(() => {
+      // Ищем кнопку "Войти" или "Sign in"
+      const allElements = Array.from(document.querySelectorAll('button, a, span, div'));
+      const hasSignIn = allElements.some(el => {
+        const text = (el.textContent || '').toLowerCase();
+        return /войти|sign\s*in|log\s*in|login/i.test(text);
+      });
+      
+      // Ищем аватар или элементы пользователя
+      const userSelectors = [
+        '[class*="avatar"]',
+        '[class*="user"]',
+        '[data-testid*="user"]',
+        '[class*="profile"]',
+        '[class*="account"]'
+      ];
+      const hasUserElement = userSelectors.some(selector => !!document.querySelector(selector));
+      
+      return {
+        hasSignInButton: hasSignIn,
+        hasUserElement: hasUserElement,
+        isLikelyLoggedIn: !hasSignInButton && hasUserElement
+      };
+    });
+    
+    log('DOM authentication indicators:', authStatus);
+    
+    if (authStatus.hasSignInButton) {
+      log('WARNING: Sign-in UI detected - user likely NOT logged in', { domain });
+    }
+    
+    return {
+      cookiesCount: cookies.length,
+      authCookiesCount: foundAuthCookies.length,
+      ...authStatus
+    };
+    
+  } catch (error) {
+    log('ERROR checking authentication status:', { 
+      domain,
+      error: error.message,
+      stack: error.stack 
+    });
+    return { error: error.message };
+  }
+}
+
 
 if (debugMode) {
   log('Debug mode enabled');
@@ -218,6 +308,11 @@ try {
   }
 
   await new Promise((resolve) => setTimeout(resolve, waitAfterLoad));
+
+  // Проверяем статус авторизации, если указан домен
+  if (checkAuthDomain) {
+    await checkAuthStatus(page, checkAuthDomain);
+  }
 
   if (selector) {
     await page.waitForSelector(selector, {
