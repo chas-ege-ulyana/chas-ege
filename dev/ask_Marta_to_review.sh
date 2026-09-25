@@ -8,6 +8,7 @@ echo "Asking Marta to review PR#$1 ..."
   --executable=/snap/bin/chromium \
   --profile="../chas-ege-chromium-profiles/marta-auto" \
   --url="https://chat.qwen.ai" \
+  --check-auth=chat.qwen.ai \
   --wait-after-load=16000 \
   --text="https://github.com/nickkolok/chas-ege/pull/$1" \
   --fast-insert \
