@@ -190,7 +190,7 @@ async function checkAuthStatus(page, domain) {
       return {
         hasSignInButton: hasSignIn,
         hasUserElement: hasUserElement,
-        isLikelyLoggedIn: !hasSignInButton && hasUserElement
+        isLikelyLoggedIn: !hasSignIn && hasUserElement
       };
     });
     
