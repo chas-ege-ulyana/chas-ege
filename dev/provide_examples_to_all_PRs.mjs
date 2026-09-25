@@ -611,8 +611,12 @@ async function checkAndAskSelena(pr, token) {
         
         // 3. Коммиты в PR
         const commits = await fetchPRCommits(pr.number, token);
-        const lastCommit = commits.sort((a, b) => new Date(b.commit.committer.date) - new Date(a.commit.committer.date))[0];
-        const lastCommitDate = lastCommit ? new Date(lastCommit.commit.committer.date) : new Date(0);
+        const lastCommit = commits.sort((a, b) => {
+            const dateA = new Date(a.commit?.committer?.date || a.commit?.author?.date || 0);
+            const dateB = new Date(b.commit?.committer?.date || b.commit?.author?.date || 0);
+            return dateB - dateA;
+        })[0];
+        const lastCommitDate = lastCommit ? new Date(lastCommit.commit?.committer?.date || lastCommit.commit?.author?.date || 0) : new Date(0);
         
         // 4. Проверяем условие: после последнего упоминания нет ни коммита, ни комментария от Селены
         if (lastSelenaCommentDate > lastMentionDate || lastCommitDate > lastMentionDate) {
