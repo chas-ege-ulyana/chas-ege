@@ -247,11 +247,11 @@ async function main() {
         }
 
         // Read gitstatus from dist/gitstatus.txt
-        let gitStatus = 'unknown';
+        let currentBuildHash = 'unknown';
         try {
             const gitStatusPath = path.join(projectRoot, 'dist', 'gitstatus.txt');
             const gitStatusContent = fs.readFileSync(gitStatusPath, 'utf8');
-            gitStatus = gitStatusContent.split('\n')[0].trim();
+            currentBuildHash = gitStatusContent.split('\n')[0].trim();
         } catch (e) {
             console.warn('Could not read dist/gitstatus.txt:', e.message);
         }
@@ -266,7 +266,7 @@ async function main() {
             } else {
                 console.log(`\nSkipping image processing for empty task in ${example.filename}.`);
             }
-            blocks.push(`<details>\n<summary>ПРИМЕРЫ_ЗАДАЧ \`${example.filename}\` ${headSha} сборка ${gitStatus}</summary>\n\n${processed}\n\n</details>`);
+            blocks.push(`<details>\n<summary>ПРИМЕРЫ_ЗАДАЧ \`${example.filename}\` ${headSha} сборка ${currentBuildHash}</summary>\n\n${processed}\n\n</details>`);
         }
 
         const commentBody = blocks.join('\n\n---\n\n');
