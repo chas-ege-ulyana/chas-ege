@@ -344,11 +344,11 @@ async function main() {
         }
 
 
-        let currentBuildHash = 'unknown';
+        let currentGitStatus = 'unknown';
         try {
             const gitStatusPath = path.join(projectRoot, 'dist', 'gitstatus.txt');
             const gitStatusContent = fs.readFileSync(gitStatusPath, 'utf8');
-            currentBuildHash = gitStatusContent.split('\n')[0].trim();
+            currentGitStatus = gitStatusContent.split('\n')[0].trim();
         } catch (e) {
             console.warn('Could not read dist/gitstatus.txt:', e.message);
         }
@@ -383,13 +383,13 @@ async function main() {
 
 
         for (const pr of prs) {
-            if (currentBuildHash === 'unknown') {
-                console.log(`⚠️ Current build hash is unknown. Skipping PR #${pr.number} to avoid infinite regeneration.`);
+            if (currentGitStatus === 'unknown') {
+                console.log(`⚠️ Current git status is unknown. Skipping PR #${pr.number} to avoid infinite regeneration.`);
                 continue;
             }
 
             const prHeadSha = pr.head.sha;
-            const cacheKey = `${prHeadSha}:${currentBuildHash}`;
+            const cacheKey = `${prHeadSha}:${currentGitStatus}`;
 
             if (noExamplesNeededCache.has(cacheKey)) {
                 console.log(`🎉 PR #${pr.number} уже проверен для текущих хэшей (примеры не нужны). Пропускаем!`);
@@ -445,7 +445,7 @@ async function main() {
 
                 const lastComment = exampleComments[exampleComments.length - 1];
                 const commentBody = lastComment.body;
-                const match = commentBody.match(/ПРИМЕРЫ_ЗАДАЧ\s+`([^`]+)`\s+([0-9a-f]+)\s+сборка\s+([^\s]+)/);
+                const match = commentBody.match(/ПРИМЕРЫ_ЗАДАЧ\s+([^\s]+)\s+([0-9a-f]+)\s+сборка\s+([0-9a-f]+)/);
                 if (!match) {
                     console.log(`Could not parse ПРИМЕРЫ_ЗАДАЧ comment in PR #${pr.number}. Generating.`);
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
@@ -455,12 +455,12 @@ async function main() {
                     continue;
                 }
 
-                let commentedFile = match[1];
+                let commentedFile = match[1].replace(/^`|`$/g, '');
                 const commitHash = match[2];
-                const savedBuildHash = match[3];
+                const buildCommit = match[3];
 
-                if (savedBuildHash !== currentBuildHash) {
-                    const compareUrl = `https://api.github.com/repos/${owner}/${repo}/compare/${savedBuildHash}...${currentBuildHash}`;
+                if (buildCommit !== currentGitStatus) {
+                    const compareUrl = `https://api.github.com/repos/${owner}/${repo}/compare/${buildCommit}...${currentGitStatus}`;
                     const compareResp = await fetch(compareUrl, {
                         headers: {
                             'Accept': 'application/vnd.github.v3+json',
@@ -473,7 +473,7 @@ async function main() {
                         const diffFiles = compareData.files || [];
                         const hasNonZdnMdDoc = diffFiles.some(f => !f.filename.startsWith('zdn/') && !f.filename.startsWith('md/') && !f.filename.startsWith('doc/'));
                         if (hasNonZdnMdDoc) {
-                            console.log(`Saved build hash differs from current not only by zdn/md/doc. Generating.`);
+                            console.log(`Build commit differs from current not only by zdn/md/doc. Generating.`);
                             
                             // Check if we should edit last comment
                             let shouldEditLast = false;
@@ -496,7 +496,7 @@ async function main() {
                     } else {
                         const errorText = await compareResp.text();
                         console.log(`Failed to compare commits. Status: ${compareResp.status} ${compareResp.statusText}. Response: ${errorText.substring(0, 500)}`);
-                        console.log(`Debug: savedBuildHash=${savedBuildHash}, currentBuildHash=${currentBuildHash}`);
+                        console.log(`Debug: buildCommit=${buildCommit}, currentGitStatus=${currentGitStatus}`);
                         totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                         generatedExamplesCache.add(cacheKey);
                         fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
