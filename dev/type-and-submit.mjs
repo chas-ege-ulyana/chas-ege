@@ -311,7 +311,7 @@ try {
       }
     }
     // Даём Chromium время на завершение внутренних операций и сохранение cookies
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 10000));
   } catch (e) {
     // Если не получилось закрыть страницы, всё равно пробуем закрыть браузер
   }
