@@ -52,6 +52,10 @@ async function getRateLimit(token) {
 async function handlePRWithExamples(pr, token) {
     console.log(`🔍 Обработка PR #${pr.number} (примеры уже есть)`);
     
+    // Проверка Селены (независимо от номера PR, перед заглушкой)
+    await checkAndAskSelena(pr, token);
+
+    
     // Заглушка: пропускаем PR с номером меньше 3400
     if (pr.number < 3300) {
         console.log(`⏭️  PR #${pr.number} < 3300, пропускаем (заглушка)`);
@@ -578,3 +582,92 @@ async function main() {
 }
 
 main();
+
+
+async function checkAndAskSelena(pr, token) {
+    console.log(`🔍 Проверка Селены для PR #${pr.number}`);
+    try {
+        const comments = await fetchPRComments(pr.number, token);
+        
+        // 1. Комментарии, упоминающие @chas-ege-selena
+        const selenaMentions = comments.filter(c => 
+            c.body && c.body.includes('@chas-ege-selena')
+        );
+        
+        if (selenaMentions.length === 0) {
+            return;
+        }
+        
+        // Последний комментарий с упоминанием
+        const lastMention = selenaMentions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+        const lastMentionDate = new Date(lastMention.created_at);
+        
+        // 2. Комментарии от самой chas-ege-selena
+        const selenaComments = comments.filter(c => 
+            c.user && c.user.login === 'chas-ege-selena'
+        );
+        const lastSelenaComment = selenaComments.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+        const lastSelenaCommentDate = lastSelenaComment ? new Date(lastSelenaComment.created_at) : new Date(0);
+        
+        // 3. Коммиты в PR
+        const commits = await fetchPRCommits(pr.number, token);
+        const lastCommit = commits.sort((a, b) => new Date(b.commit.committer.date) - new Date(a.commit.committer.date))[0];
+        const lastCommitDate = lastCommit ? new Date(lastCommit.commit.committer.date) : new Date(0);
+        
+        // 4. Проверяем условие: после последнего упоминания нет ни коммита, ни комментария от Селены
+        if (lastSelenaCommentDate > lastMentionDate || lastCommitDate > lastMentionDate) {
+            console.log(`⏭️ PR #${pr.number}: Селена уже ответила или был коммит после замечаний, пропускаем.`);
+            return;
+        }
+        
+        console.log(`🚀 PR #${pr.number}: Есть свежие замечания для Селены, зовём её!`);
+        const scriptPath = path.join(projectRoot, 'dev', 'ask_Selena_to_fix.sh');
+        
+        const { stdout, stderr } = await execFileAsync('bash', [scriptPath, pr.number.toString()], {
+            cwd: projectRoot,
+            maxBuffer: 1024 * 1024 * 10
+        });
+        
+        if (stderr) {
+            console.warn(`stderr from ask_Selena_to_fix.sh:\n${stderr}`);
+        }
+        
+        // Записываем вывод в selena.log
+        const logPath = path.join(projectRoot, 'selena.log');
+        const logEntry = `[${new Date().toISOString()}] PR #${pr.number}\n${stdout}\n${stderr ? 'STDERR: ' + stderr : ''}\n${'='.repeat(80)}\n`;
+        fs.appendFileSync(logPath, logEntry);
+        
+        console.log(`✅ PR #${pr.number}: ask_Selena_to_fix.sh выполнен успешно`);
+        
+    } catch (error) {
+        console.error(`❌ PR #${pr.number}: Ошибка при проверке Селены:`, error.message);
+        if (error.stderr) {
+            console.error('stderr:', error.stderr);
+        }
+    }
+}
+
+async function fetchPRCommits(prNum, token) {
+    let commits = [];
+    let url = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNum}/commits?per_page=100`;
+    while (url) {
+        const response = await fetch(url, {
+            headers: {
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'chas-ege-provide-examples-all-prs',
+                ...(token && { 'Authorization': `token ${token}` })
+            }
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        const data = await response.json();
+        commits = commits.concat(data);
+        const linkHeader = response.headers.get('link');
+        if (linkHeader) {
+            const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+            url = nextMatch ? nextMatch[1] : null;
+        } else {
+            url = null;
+        }
+    }
+    return commits;
+}
