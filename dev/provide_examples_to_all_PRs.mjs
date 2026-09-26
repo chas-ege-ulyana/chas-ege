@@ -398,7 +398,8 @@ async function main() {
         }
 
 
-        for (const pr of prs) {
+        for (let i = 0; i < prs.length; i++) {
+            const pr = prs[i];
             if (currentGitStatus === 'unknown') {
                 console.log(`⚠️ Current git status is unknown. Skipping PR #${pr.number} to avoid infinite regeneration.`);
                 continue;
@@ -425,7 +426,7 @@ async function main() {
                 continue;
             }
 
-            console.log(`\n--- Checking PR #${pr.number} ---`);
+            console.log(`\n[${new Date().toLocaleTimeString()}] --- Checking PR #${pr.number} [${i + 1}/${prs.length}] ---`);
             try {
                 const files = await fetchAllPRFiles(pr.number, token);
                 
