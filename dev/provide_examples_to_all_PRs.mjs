@@ -61,9 +61,9 @@ async function handlePRWithExamples(pr, token, cachedComments = null, cachedComm
     await checkAndAskUser(pr, token, 'chas-ege-polina', 'ask_Polina_to_fix.sh', 'polina.log', comments, commits);
 
     
-    // Заглушка: пропускаем PR с номером меньше 3400
-    if (pr.number < 3300) {
-        console.log(`⏭️  PR #${pr.number} < 3300, пропускаем (заглушка)`);
+    // Заглушка: пропускаем PR с номером меньше 3280
+    if (pr.number < 3280) {
+        console.log(`⏭️  PR #${pr.number} < 3280, пропускаем (заглушка)`);
         return;
     }
     
