@@ -271,12 +271,14 @@ console.log(`Mode: ${headless ? 'headless' : 'visible'}`);
         }
         
         // Regenerate task (except for the very first generation which already happened)
-        if (i > 0) {
+        // BUT if preferences exist, the first auto-generation used random preferences,
+        // so we must regenerate even for i === 0 to get the correct combination
+        if (i > 0 || combinations.length > 0) {
             await page.evaluate(() => {
                 createFromFile();
             });
         }
-        // i === 0: first generation already done (auto-started by otladka.js)
+        // i === 0 without preferences: first generation already done (auto-started by otladka.js)
         
         // Wait for question to be generated
         try {
