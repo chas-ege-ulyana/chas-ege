@@ -49,11 +49,16 @@ async function getRateLimit(token) {
     }
 }
 
-async function handlePRWithExamples(pr, token) {
+async function handlePRWithExamples(pr, token, cachedComments = null, cachedCommits = null) {
     console.log(`🔍 Обработка PR #${pr.number} (примеры уже есть)`);
     
     // Проверка Селены (независимо от номера PR, перед заглушкой)
-    await checkAndAskSelena(pr, token);
+    // Получаем или используем кэшированные данные
+    const comments = cachedComments || await fetchPRComments(pr.number, token);
+    const commits = cachedCommits || await fetchPRCommits(pr.number, token);
+    
+    // Проверка Селены (независимо от номера PR, перед заглушкой)
+    await checkAndAskSelena(pr, token, comments, commits);
 
     
     // Заглушка: пропускаем PR с номером меньше 3400
@@ -63,8 +68,6 @@ async function handlePRWithExamples(pr, token) {
     }
     
     try {
-        // Получаем все комментарии в PR
-        const comments = await fetchPRComments(pr.number, token);
         
         // Фильтруем комментарии от Марты
         const martaComments = comments.filter(c => c.user && c.user.login === 'chas-ege-marta');
@@ -398,7 +401,7 @@ async function main() {
 
             if (generatedExamplesCache.has(cacheKey)) {
                 console.log(`🎉 PR #${pr.number} уже проверен для текущих хэшей (примеры сгенерированы). Переходим к заглушке.`);
-                await handlePRWithExamples(pr, token);
+                await handlePRWithExamples(pr, token, null, null);
                 continue;
             }
 
@@ -428,6 +431,7 @@ async function main() {
                 }
 
                 const comments = await fetchPRComments(pr.number, token);
+                const commits = await fetchPRCommits(pr.number, token);
                 const exampleComments = comments.filter(c => 
             c.body.includes('ПРИМЕРЫ_ЗАДАЧ') && 
             c.user && 
@@ -439,7 +443,7 @@ async function main() {
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                     generatedExamplesCache.add(cacheKey);
                     fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                    await handlePRWithExamples(pr, token);
+                    await handlePRWithExamples(pr, token, comments, commits);
                     continue;
                 }
 
@@ -451,7 +455,7 @@ async function main() {
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                     generatedExamplesCache.add(cacheKey);
                     fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                    await handlePRWithExamples(pr, token);
+                    await handlePRWithExamples(pr, token, comments, commits);
                     continue;
                 }
 
@@ -490,7 +494,7 @@ async function main() {
                             }
                             generatedExamplesCache.add(cacheKey);
                             fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                            await handlePRWithExamples(pr, token);
+                            await handlePRWithExamples(pr, token, comments, commits);
                             continue;
                         }
                     } else {
@@ -500,7 +504,7 @@ async function main() {
                         totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                         generatedExamplesCache.add(cacheKey);
                         fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                        await handlePRWithExamples(pr, token);
+                        await handlePRWithExamples(pr, token, comments, commits);
                         continue;
                     }
                 }
@@ -537,12 +541,12 @@ async function main() {
                     totalGenerationTime += await runProvideScript(pr.number, [...filteredArgs, '--user-data-dir', userDataDir]);
                     generatedExamplesCache.add(cacheKey);
                     fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                    await handlePRWithExamples(pr, token);
+                    await handlePRWithExamples(pr, token, comments, commits);
                 } else {
                     console.log(`File ${commentedFile} is identical. Skipping generation, but handling as generated.`);
                     generatedExamplesCache.add(cacheKey);
                     fs.appendFileSync(generatedExamplesCacheFilePath, cacheKey + '\n');
-                    await handlePRWithExamples(pr, token);
+                    await handlePRWithExamples(pr, token, comments, commits);
                 }
 
             } catch (e) {
@@ -584,10 +588,10 @@ async function main() {
 main();
 
 
-async function checkAndAskSelena(pr, token) {
+async function checkAndAskSelena(pr, token, cachedComments = null, cachedCommits = null) {
     console.log(`🔍 Проверка Селены для PR #${pr.number}`);
     try {
-        const comments = await fetchPRComments(pr.number, token);
+        const comments = cachedComments || await fetchPRComments(pr.number, token);
         
         // 1. Комментарии, упоминающие @chas-ege-selena
         const selenaMentions = comments.filter(c => 
@@ -610,7 +614,7 @@ async function checkAndAskSelena(pr, token) {
         const lastSelenaCommentDate = lastSelenaComment ? new Date(lastSelenaComment.created_at) : new Date(0);
         
         // 3. Коммиты в PR
-        const commits = await fetchPRCommits(pr.number, token);
+        const commits = cachedCommits || await fetchPRCommits(pr.number, token);
         const lastCommit = commits.sort((a, b) => {
             const dateA = new Date(a.commit?.committer?.date || a.commit?.author?.date || 0);
             const dateB = new Date(b.commit?.committer?.date || b.commit?.author?.date || 0);
