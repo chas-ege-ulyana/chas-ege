@@ -52,13 +52,13 @@ async function getRateLimit(token) {
 async function handlePRWithExamples(pr, token, cachedComments = null, cachedCommits = null) {
     console.log(`🔍 Обработка PR #${pr.number} (примеры уже есть)`);
     
-    // Проверка Селены (независимо от номера PR, перед заглушкой)
     // Получаем или используем кэшированные данные
     const comments = cachedComments || await fetchPRComments(pr.number, token);
     const commits = cachedCommits || await fetchPRCommits(pr.number, token);
     
-    // Проверка Селены (независимо от номера PR, перед заглушкой)
-    await checkAndAskSelena(pr, token, comments, commits);
+    // Проверка Селены и Полины (независимо от номера PR, перед заглушкой)
+    await checkAndAskUser(pr, token, 'chas-ege-selena', 'ask_Selena_to_fix.sh', 'selena.log', comments, commits);
+    await checkAndAskUser(pr, token, 'chas-ege-polina', 'ask_Polina_to_fix.sh', 'polina.log', comments, commits);
 
     
     // Заглушка: пропускаем PR с номером меньше 3400
@@ -611,30 +611,30 @@ async function main() {
 main();
 
 
-async function checkAndAskSelena(pr, token, cachedComments = null, cachedCommits = null) {
-    console.log(`🔍 Проверка Селены для PR #${pr.number}`);
+async function checkAndAskUser(pr, token, userLogin, scriptName, logName, cachedComments = null, cachedCommits = null) {
+    console.log(`🔍 Проверка ${userLogin} для PR #${pr.number}`);
     try {
         const comments = cachedComments || await fetchPRComments(pr.number, token);
         
-        // 1. Комментарии, упоминающие @chas-ege-selena
-        const selenaMentions = comments.filter(c => 
-            c.body && c.body.includes('@chas-ege-selena')
+        // 1. Комментарии, упоминающие @userLogin
+        const userMentions = comments.filter(c => 
+            c.body && c.body.includes(`@${userLogin}`)
         );
         
-        if (selenaMentions.length === 0) {
+        if (userMentions.length === 0) {
             return;
         }
         
         // Последний комментарий с упоминанием
-        const lastMention = selenaMentions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+        const lastMention = userMentions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
         const lastMentionDate = new Date(lastMention.created_at);
         
-        // 2. Комментарии от самой chas-ege-selena
-        const selenaComments = comments.filter(c => 
-            c.user && c.user.login === 'chas-ege-selena'
+        // 2. Комментарии от самого userLogin
+        const userComments = comments.filter(c => 
+            c.user && c.user.login === userLogin
         );
-        const lastSelenaComment = selenaComments.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-        const lastSelenaCommentDate = lastSelenaComment ? new Date(lastSelenaComment.created_at) : new Date(0);
+        const lastUserComment = userComments.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+        const lastUserCommentDate = lastUserComment ? new Date(lastUserComment.created_at) : new Date(0);
         
         // 3. Коммиты в PR
         const commits = cachedCommits || await fetchPRCommits(pr.number, token);
@@ -645,14 +645,14 @@ async function checkAndAskSelena(pr, token, cachedComments = null, cachedCommits
         })[0];
         const lastCommitDate = lastCommit ? new Date(lastCommit.commit?.committer?.date || lastCommit.commit?.author?.date || 0) : new Date(0);
         
-        // 4. Проверяем условие: после последнего упоминания нет ни коммита, ни комментария от Селены
-        if (lastSelenaCommentDate > lastMentionDate || lastCommitDate > lastMentionDate) {
-            console.log(`⏭️ PR #${pr.number}: Селена уже ответила или был коммит после замечаний, пропускаем.`);
+        // 4. Проверяем условие: после последнего упоминания нет ни коммита, ни комментария от пользователя
+        if (lastUserCommentDate > lastMentionDate || lastCommitDate > lastMentionDate) {
+            console.log(`⏭️ PR #${pr.number}: ${userLogin} уже ответил(а) или был коммит после замечаний, пропускаем.`);
             return;
         }
         
-        console.log(`🚀 PR #${pr.number}: Есть свежие замечания для Селены, зовём её!`);
-        const scriptPath = path.join(projectRoot, 'dev', 'ask_Selena_to_fix.sh');
+        console.log(`🚀 PR #${pr.number}: Есть свежие замечания для ${userLogin}, зовём!`);
+        const scriptPath = path.join(projectRoot, 'dev', scriptName);
         
         const { stdout, stderr } = await execFileAsync('bash', [scriptPath, pr.number.toString()], {
             cwd: projectRoot,
@@ -660,23 +660,24 @@ async function checkAndAskSelena(pr, token, cachedComments = null, cachedCommits
         });
         
         if (stderr) {
-            console.warn(`stderr from ask_Selena_to_fix.sh:\n${stderr}`);
+            console.warn(`stderr from ${scriptName}:\n${stderr}`);
         }
         
-        // Записываем вывод в selena.log
-        const logPath = path.join(projectRoot, 'selena.log');
+        // Записываем вывод в log
+        const logPath = path.join(projectRoot, logName);
         const logEntry = `[${new Date().toISOString()}] PR #${pr.number}\n${stdout}\n${stderr ? 'STDERR: ' + stderr : ''}\n${'='.repeat(80)}\n`;
         fs.appendFileSync(logPath, logEntry);
         
-        console.log(`✅ PR #${pr.number}: ask_Selena_to_fix.sh выполнен успешно`);
+        console.log(`✅ PR #${pr.number}: ${scriptName} выполнен успешно`);
         
     } catch (error) {
-        console.error(`❌ PR #${pr.number}: Ошибка при проверке Селены:`, error.message);
+        console.error(`❌ PR #${pr.number}: Ошибка при проверке ${userLogin}:`, error.message);
         if (error.stderr) {
             console.error('stderr:', error.stderr);
         }
     }
 }
+
 
 async function fetchPRCommits(prNum, token) {
     let commits = [];
