@@ -49,6 +49,21 @@ async function getRateLimit(token) {
     }
 }
 
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function waitForRateLimitReset(token) {
+    console.log('🛑 Rate limit почти исчерпан, делаем паузу...');
+    const rateLimit = await getRateLimit(token);
+    if (rateLimit && rateLimit.reset) {
+        const resetTime = new Date(rateLimit.reset * 1000);
+        const now = new Date();
+        const waitMs = Math.max(0, resetTime - now) + 5000; // +5 секунд на всякий случай
+        console.log(`⏳ Ждём до ${resetTime.toLocaleString()} (${Math.ceil(waitMs / 1000)} секунд)`);
+        await sleep(waitMs);
+    }
+}
+
 async function handlePRWithExamples(pr, token, cachedComments = null, cachedCommits = null) {
     console.log(`🔍 Обработка PR #${pr.number} (примеры уже есть)`);
     
@@ -400,6 +415,12 @@ async function main() {
 
         for (let i = 0; i < prs.length; i++) {
             const pr = prs[i];
+            // Проверяем rate limit перед обработкой PR
+            const currentRateLimit = await getRateLimit(token);
+            if (currentRateLimit && currentRateLimit.remaining < 50) {
+                await waitForRateLimitReset(token);
+            }
+
             if (currentGitStatus === 'unknown') {
                 console.log(`⚠️ Current git status is unknown. Skipping PR #${pr.number} to avoid infinite regeneration.`);
                 continue;
