@@ -372,6 +372,19 @@ async function main() {
             console.log(`Loaded ${generatedExamplesCache.size} entries from generated-examples cache.`);
         }
 
+        const prUpdatedAtCacheFilePath = path.join(projectRoot, '.pr-updated-at-no-action.cache');
+        let prUpdatedAtCache = {};
+        if (fs.existsSync(prUpdatedAtCacheFilePath)) {
+            try {
+                const content = fs.readFileSync(prUpdatedAtCacheFilePath, 'utf8');
+                prUpdatedAtCache = JSON.parse(content);
+                console.log(`Loaded ${Object.keys(prUpdatedAtCache).length} entries from pr-updated-at-no-action cache.`);
+            } catch (e) {
+                console.warn('Could not parse pr-updated-at-no-action cache:', e.message);
+                prUpdatedAtCache = {};
+            }
+        }
+
         // Фетчим только открытые PR, чтобы не тянуть тысячи закрытых
         console.log(`🚀 Fetching ${prs.length} open PR refs from upstream...`);
         const refspecs = prs.map(pr => `+refs/pull/${pr.number}/head:refs/remotes/upstream/pr/${pr.number}`);
@@ -388,6 +401,13 @@ async function main() {
         for (const pr of prs) {
             if (currentGitStatus === 'unknown') {
                 console.log(`⚠️ Current git status is unknown. Skipping PR #${pr.number} to avoid infinite regeneration.`);
+                continue;
+            }
+
+            // Проверяем кэш updated_at для PR, где ничего не надо делать
+            const prNumber = pr.number.toString();
+            if (prUpdatedAtCache[prNumber] && prUpdatedAtCache[prNumber] === pr.updated_at) {
+                console.log(`⏭️ PR #${pr.number}: updated_at не изменился (${pr.updated_at}), пропускаем без API-запросов.`);
                 continue;
             }
 
@@ -427,6 +447,9 @@ async function main() {
                     console.log(`PR #${pr.number} has ${validFiles.length} valid zdn/*/*/*.js files. Skipping.`);
                     noExamplesNeededCache.add(cacheKey);
                     fs.appendFileSync(noExamplesNeededCacheFilePath, cacheKey + '\n');
+                    // Сохраняем updated_at для этого PR
+                    prUpdatedAtCache[pr.number.toString()] = pr.updated_at;
+                    fs.writeFileSync(prUpdatedAtCacheFilePath, JSON.stringify(prUpdatedAtCache, null, 2));
                     continue;
                 }
 
