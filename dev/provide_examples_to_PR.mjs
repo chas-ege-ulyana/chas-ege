@@ -74,7 +74,7 @@ function extractLatex(output) {
         return 'ЗАДАЧА_НЕ_ГЕНЕРИРУЕТСЯ';
     }
     // Match optional PREFERENCE marker before each LaTeX block
-    const regex = /(?:=== PREFERENCE: (.+) ===\r?\n)?=== LaTeX CODE START ===\r?\n([\s\S]*?)\r?\n=== LaTeX CODE END ===/g;
+    const regex = /(?:=== PREFERENCE: (.+) ===[\s\S]*?)?=== LaTeX CODE START ===\r?\n([\s\S]*?)\r?\n=== LaTeX CODE END ===/g;
     const matches = [...output.matchAll(regex)];
     return matches.map((m, i) => {
         const preference = m[1] ? ` (${m[1]})` : '';
