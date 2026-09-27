@@ -77,7 +77,19 @@ function extractLatex(output) {
     const regex = /(?:=== PREFERENCE: (.+) ===[\s\S]*?)?=== LaTeX CODE START ===\r?\n([\s\S]*?)\r?\n=== LaTeX CODE END ===/g;
     const matches = [...output.matchAll(regex)];
     return matches.map((m, i) => {
-        const preference = m[1] ? ` (${m[1]})` : '';
+        let preference = '';
+        if (m[1]) {
+            try {
+                const arr = JSON.parse(m[1]);
+                if (Array.isArray(arr)) {
+                    preference = ` [${arr.join(', ')}]`;
+                } else {
+                    preference = ` [${m[1]}]`;
+                }
+            } catch (e) {
+                preference = ` [${m[1]}]`;
+            }
+        }
         return `## Пример ${i + 1}${preference}\n\n${m[2].trim()}`;
     }).filter(text => text.length > 0).join('\n\n---\n\n');
 }
