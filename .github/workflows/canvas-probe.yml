@@ -1,0 +1,58 @@
+name: canvas-probe
+on:
+  push:
+    branches: [ci-canvas-probe]
+
+jobs:
+  host:
+    name: ubuntu-latest (hosted runner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm install --no-save --no-audit --no-fund grunt-cli canvas
+      - run: ./node_modules/.bin/grunt concat
+      - name: probe canvas templates
+        run: |
+          echo "PROBE fonts(fc-list): $(fc-list 2>/dev/null | wc -l)"
+          node dev/run-node-template.js --filepath zdn/mat2014/B3/6.js --json > probe-text.json
+          node dev/run-node-template.js --filepath zdn/mat2014/B5/7.js --json > probe-shapes.json
+          node -e 'const fs=require("fs");for(const f of["probe-text.json","probe-shapes.json"]){const r=JSON.parse(fs.readFileSync(f,"utf8"))[0];const m=(r.txt.match(/data:image\/png;base64,([A-Za-z0-9+\/=]+)/)||[])[1];console.log("PROBE "+f+" backend="+r.canvasBackend+" images="+r.canvasImages+" pngBytes="+(m?Buffer.from(m,"base64").length:0));if(m)fs.writeFileSync(f.replace(".json",".png"),Buffer.from(m,"base64"));}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-host
+          path: |
+            probe-text.png
+            probe-shapes.png
+
+  slim-with-fonts:
+    name: debian:bookworm-slim + apt fontconfig fonts-liberation
+    runs-on: ubuntu-latest
+    container: node:22-bookworm-slim
+    steps:
+      - name: system deps (documented apt line)
+        run: apt-get update && apt-get install -y git fontconfig fonts-liberation
+      - name: clone probe branch
+        run: git clone --depth 1 --branch ci-canvas-probe https://github.com/chas-ege-ulyana/chas-ege /probe
+      - name: npm install
+        working-directory: /probe
+        run: npm install --no-audit --no-fund
+      - name: npm install canvas + grunt-cli
+        working-directory: /probe
+        run: npm install --no-save --no-audit --no-fund grunt-cli canvas
+      - name: grunt concat
+        working-directory: /probe
+        run: ./node_modules/.bin/grunt concat
+      - name: probe canvas template with text
+        working-directory: /probe
+        run: |
+          echo "PROBE fonts(fc-list): $(fc-list 2>/dev/null | wc -l)"
+          node dev/run-node-template.js --filepath zdn/mat2014/B3/6.js --json > probe-text.json
+          node -e 'const fs=require("fs");const r=JSON.parse(fs.readFileSync("probe-text.json","utf8"))[0];const m=(r.txt.match(/data:image\/png;base64,([A-Za-z0-9+\/=]+)/)||[])[1];console.log("PROBE slim backend="+r.canvasBackend+" images="+r.canvasImages+" pngBytes="+(m?Buffer.from(m,"base64").length:0));if(m)fs.writeFileSync("probe-text.png",Buffer.from(m,"base64"));'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-slim
+          path: /probe/probe-text.png
