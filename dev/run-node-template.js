@@ -484,8 +484,14 @@ function processTemplate(filepath) {
 			console.log(first.txt.replace(/<br\s*\/?>/g, '\n'));
 			console.log('--- Ответ ---');
 			console.log(first.ver.join(' ИЛИ '));
-			if (opts.tex) {
-				console.log('=== LaTeX CODE START ===');
+		if (opts.tex) {
+			// Маркер непосредственно перед блоком: extractLatex() из
+			// dev/provide_examples_to_PR.mjs привязывает preference к блоку
+			// только если строка === PREFERENCE … === стоит прямо перед START.
+			if (combinations.length > 0) {
+				console.log('=== PREFERENCE: ' + JSON.stringify(combinations[comboIdx]) + ' ===');
+			}
+			console.log('=== LaTeX CODE START ===');
 				console.log(toLatex(first));
 				console.log('=== LaTeX CODE END ===');
 			}
