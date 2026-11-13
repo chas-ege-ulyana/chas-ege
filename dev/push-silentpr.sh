@@ -21,13 +21,121 @@ if [ -z "$SOURCE_REMOTE" ]; then
     echo "Использование: $0 [-i] <source_remote>"
     echo "Пример: $0 chas-ege-ulyana"
     echo "Флаги:"
-    echo "  -i, --interactive  Интерактивный режим (y/n/d для каждого silentpr)"
+    echo "  -i, --interactive  Интерактивный режим (y/n/d/s для каждого silentpr)"
     exit 1
 fi
 
 echo "🔄 Подтягиваем свежие ветки из $SOURCE_REMOTE..."
 # ВАЖНО: --quiet должен быть ПЕРЕД именем ремоута!
 git fetch --quiet --prune "$SOURCE_REMOTE"
+
+# Классифицирует характер изменений между деревьями a и b.
+# Печатает системную метку (или ничего):
+#   trimmed-whitespace only — только пробелы и только в началах/концах строк
+#   whitespace-only         — только пробелы (включая пустые строки и пробелы внутри строк)
+classify_whitespace() {
+    local a="$1" b="$2" f trimmed=yes
+    # Содержательных изменений нет вовсе (деревья совпадают) — метка не нужна
+    if git diff --quiet "$a" "$b" 2>/dev/null; then
+        return 0
+    fi
+    # Есть не-пробельные изменения?
+    if [ -n "$(git diff --ignore-all-space --ignore-blank-lines "$a" "$b" 2>/dev/null)" ]; then
+        return 0
+    fi
+    # Пробелы только по краям строк? Сравниваем файлы с обрезанными краями строк.
+    while IFS= read -r -d '' f; do
+        if ! git cat-file -e "$a:$f" 2>/dev/null || ! git cat-file -e "$b:$f" 2>/dev/null; then
+            trimmed=no
+            break
+        fi
+        if ! cmp -s \
+            <(git show "$a:$f" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//') \
+            <(git show "$b:$f" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'); then
+            trimmed=no
+            break
+        fi
+    done < <(git diff --name-only --no-renames -z "$a" "$b")
+    if [ "$trimmed" = yes ]; then
+        echo "trimmed-whitespace only"
+    else
+        echo "whitespace-only"
+    fi
+}
+
+# Показывает изменения a..b: сообщение коммита (если он один), ws-метка, цветной diff
+show_diff() {
+    local a="$1" b="$2" note
+    if [ "$(git rev-list --count --first-parent "$a..$b" 2>/dev/null)" = "1" ]; then
+        echo "💬 Сообщение коммита $(git rev-parse --short "$b"):"
+        git log -1 --format=%B "$b"
+    fi
+    note=$(classify_whitespace "$a" "$b")
+    [ -n "$note" ] && echo "⚙️  $note"
+    git diff --color=always --stat --patch "$a" "$b"
+}
+
+# Показывает один коммит: сообщение, ws-метка, цветной diff (для split-режима)
+show_commit() {
+    local c="$1" note
+    echo "💬 Сообщение коммита $(git rev-parse --short "$c"):"
+    git log -1 --format=%B "$c"
+    note=$(classify_whitespace "$c^" "$c")
+    [ -n "$note" ] && echo "⚙️  $note"
+    git diff --color=always --stat --patch "$c^" "$c"
+}
+
+# Split-режим: пушим коммиты по одному, от старых к новым, до первого отказа/ошибки.
+# --first-parent: идём по основной линии, чтобы каждый пуш был fast-forward.
+split_push() {
+    local base="$1" target_remote="$2" branch_name="$3" source_sha="$4"
+    local c choice total i=0 pushed=0
+    total=$(git rev-list --count --first-parent "$base..$source_sha")
+    echo ""
+    echo "✂️  Split-режим: коммитов к разбору: $total (от старых к новым)"
+    # Список коммитов — в массив, чтобы не занимать stdin (он нужен для ответов)
+    local commits=()
+    mapfile -t commits < <(git rev-list --reverse --first-parent "$base..$source_sha")
+    for c in "${commits[@]}"; do
+        i=$((i+1))
+        echo ""
+        echo "── Коммит $i/$total ──"
+        show_commit "$c"
+        while true; do
+            if ! read -r -p "Принять этот коммит? [y/n/?] " choice; then
+                echo ""
+                echo "⏹️  Ввод закончился (EOF) — выходим."
+                exit 0
+            fi
+            case "$choice" in
+                y|Y|n|N)
+                    break
+                    ;;
+                '?')
+                    echo "  y - запушить этот коммит и перейти к следующему"
+                    echo "  n - остановиться (остальные коммиты останутся только в source)"
+                    ;;
+                *)
+                    echo "Неизвестный выбор: $choice"
+                    ;;
+            esac
+        done
+        if [ "$choice" = n ] || [ "$choice" = N ]; then
+            echo "⏹️  Останавливаемся: без этого коммита дальше по истории идти нельзя."
+            break
+        fi
+        echo "🚀 Пушим коммит $(git rev-parse --short "$c") в '$target_remote' как '$branch_name'..."
+        if git push "$target_remote" "$c:refs/heads/$branch_name"; then
+            echo "✅ Коммит принят и запушен"
+            pushed=$((pushed+1))
+        else
+            echo "❌ Ошибка пуша — останавливаемся."
+            break
+        fi
+    done
+    echo "📊 Принято коммитов: $pushed/$total"
+    echo "-----------------------------------"
+}
 
 # Функция для интерактивного запроса.
 # ВАЖНО:
@@ -70,18 +178,29 @@ ask_action() {
     # Оба коммита уже скачаны (fetch выше), так что diff локальный и быстрый.
     # Цвет форсируем (--color=always); пейджер — стандартный git-овский:
     # короткий diff выводится сразу (LESS=FRX), длинный листается (q — выход).
+    # Заодно вычисляем SPLIT_BASE — базу для split-режима (действие s).
+    SPLIT_BASE=""
+    SPLIT_WHY=""
+    local disp_a="" disp_b="" base="" base_name="" cand
     echo ""
     if [ "$target_exists" = "yes" ]; then
         if git merge-base --is-ancestor "$source_sha" "$target_sha"; then
             echo "📄 Diff source → target (что получит source при обновлении):"
-            git diff --color=always --stat --patch "$source_sha" "$target_sha"
+            disp_a="$source_sha"
+            disp_b="$target_sha"
+            SPLIT_WHY="s недоступен: source отстаёт от target, пушить нечего (y обновит source)"
         else
             echo "📄 Diff target → source (что уйдёт в target при пуше):"
-            git diff --color=always --stat --patch "$target_sha" "$source_sha"
+            disp_a="$target_sha"
+            disp_b="$source_sha"
+            if git merge-base --is-ancestor "$target_sha" "$source_sha"; then
+                SPLIT_BASE="$target_sha"
+            else
+                SPLIT_WHY="s недоступен: ветки diverged, сначала нужен merge/rebase"
+            fi
         fi
     else
         # Целевой ветки нет: сравниваем с общей базой (devel/main/master целевого ремоута)
-        local base="" base_name="" cand
         for cand in devel main master; do
             if git rev-parse --verify --quiet "refs/remotes/$target_remote/$cand" >/dev/null 2>&1; then
                 base=$(git merge-base "$source_sha" "refs/remotes/$target_remote/$cand" 2>/dev/null)
@@ -97,18 +216,25 @@ ask_action() {
         fi
         if [ -n "$base" ]; then
             echo "📄 Diff от общей базы с $base_name (ветка новая):"
-            git diff --color=always --stat --patch "$base" "$source_sha"
+            disp_a="$base"
+            disp_b="$source_sha"
+            SPLIT_BASE="$base"
         else
             echo "📄 Общей базы нет, показываю последний коммит source:"
             git show --color=always --stat "$source_sha"
+            SPLIT_WHY="s недоступен: нет общей базы для отсчёта коммитов"
         fi
+    fi
+    if [ -n "$disp_a" ]; then
+        show_diff "$disp_a" "$disp_b"
     fi
 
     echo ""
-    echo "Действие? [y/n/d/?]"
+    echo "Действие? [y/n/d/s/?]"
     echo "  y - Запушить source в target (или обновить source если target опережает)"
     echo "  n - Пропустить этот silentpr"
     echo "  d - Удалить изменения: force reset source к target (сбросить к состоянию target)"
+    echo "  s - Разбить на коммиты: принимать по одному, от старых к новым"
     echo "  ? - Показать эту справку"
     echo ""
 
@@ -133,12 +259,21 @@ ask_action() {
                 ACTION="d"
                 return
                 ;;
+            s|S)
+                if [ -n "$SPLIT_BASE" ]; then
+                    ACTION="s"
+                    return
+                else
+                    echo "$SPLIT_WHY"
+                fi
+                ;;
             '?')
                 echo ""
                 echo "Доступные действия:"
                 echo "  y - Запушить source в target (или обновить source если target опережает)"
                 echo "  n - Пропустить этот silentpr"
                 echo "  d - Удалить изменения: force reset source к target (сбросить к состоянию target)"
+                echo "  s - Разбить на коммиты: принимать по одному, от старых к новым"
                 echo "  ? - Показать эту справку"
                 echo ""
                 ;;
@@ -211,6 +346,10 @@ while IFS= read -r ref <&3; do
                     echo "❌ Target не существует, нечего сбрасывать"
                 fi
                 echo "-----------------------------------"
+                continue
+                ;;
+            s)
+                split_push "$SPLIT_BASE" "$target_remote" "$branch_name" "$source_sha"
                 continue
                 ;;
         esac
