@@ -85,13 +85,13 @@
 			author: ['Суматохина Александра']
 		});
 		NAtask.modifiers.multiplyAnswerBySqrt(12);
-		NAtask.modifiers.allDecimalsToStandard(true);
 		NAtask.modifiers.assertSaneDecimals();
 		NAtask.modifiers.addCanvasIllustration({
 			width: 400,
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	}, 100000);
 })();
 // 27067 5065
