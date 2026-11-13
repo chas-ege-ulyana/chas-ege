@@ -66,6 +66,44 @@ ask_action() {
         echo "   Статус: 🆕 Target не существует"
     fi
 
+    # Diff перед вопросом — как у git add -p.
+    # Оба коммита уже скачаны (fetch выше), так что diff локальный и быстрый.
+    # Цвет форсируем (--color=always); пейджер — стандартный git-овский:
+    # короткий diff выводится сразу (LESS=FRX), длинный листается (q — выход).
+    echo ""
+    if [ "$target_exists" = "yes" ]; then
+        if git merge-base --is-ancestor "$source_sha" "$target_sha"; then
+            echo "📄 Diff source → target (что получит source при обновлении):"
+            git diff --color=always --stat --patch "$source_sha" "$target_sha"
+        else
+            echo "📄 Diff target → source (что уйдёт в target при пуше):"
+            git diff --color=always --stat --patch "$target_sha" "$source_sha"
+        fi
+    else
+        # Целевой ветки нет: сравниваем с общей базой (devel/main/master целевого ремоута)
+        local base="" base_name="" cand
+        for cand in devel main master; do
+            if git rev-parse --verify --quiet "refs/remotes/$target_remote/$cand" >/dev/null 2>&1; then
+                base=$(git merge-base "$source_sha" "refs/remotes/$target_remote/$cand" 2>/dev/null)
+                if [ -n "$base" ]; then
+                    base_name="$target_remote/$cand"
+                    break
+                fi
+            fi
+        done
+        if [ -z "$base" ] && git fetch --quiet "$target_remote" devel 2>/dev/null; then
+            base=$(git merge-base "$source_sha" FETCH_HEAD 2>/dev/null)
+            [ -n "$base" ] && base_name="$target_remote/devel"
+        fi
+        if [ -n "$base" ]; then
+            echo "📄 Diff от общей базы с $base_name (ветка новая):"
+            git diff --color=always --stat --patch "$base" "$source_sha"
+        else
+            echo "📄 Общей базы нет, показываю последний коммит source:"
+            git show --color=always --stat "$source_sha"
+        fi
+    fi
+
     echo ""
     echo "Действие? [y/n/d/?]"
     echo "  y - Запушить source в target (или обновить source если target опережает)"
