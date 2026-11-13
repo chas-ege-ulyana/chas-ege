@@ -42,12 +42,12 @@
 			text: `В ромбе $ABCD$ угол $${[vertices.slice(0,3), vertices.slice(0,3).permuteCyclic(1)][rand].randomReverse().join('')}$ равен $${[rhombus.angleBInDegrees, rhombus.angleAInDegrees][rand]}^\\circ$. Найдите угол $${angleQ[0]}$. Ответ дайте в градусах.`,
 			answers: angleQ[1],
 		});
-		NAtask.modifiers.allDecimalsToStandard(true);
 		NAtask.modifiers.addCanvasIllustration({
 			width: 400,
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	}, 1000);
 })();
 //3353
