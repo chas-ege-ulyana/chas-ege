@@ -26,9 +26,10 @@ if [ -z "$SOURCE_REMOTE" ]; then
 fi
 
 echo "🔄 Подтягиваем свежие ветки из $SOURCE_REMOTE..."
-git fetch "$SOURCE_REMOTE" --quiet
+# ВАЖНО: --quiet должен быть ПЕРЕД именем ремоута!
+git fetch --quiet --prune "$SOURCE_REMOTE"
 
-# Функция для интерактивного запрос
+# Функция для интерактивного запроса
 ask_action() {
     local ref="$1"
     local target_remote="$2"
@@ -112,7 +113,8 @@ git for-each-ref --format="%(refname:short)" "refs/remotes/$SOURCE_REMOTE/silent
     source_sha=$(git rev-parse "$source_full_ref")
     
     # Подтягиваем целевую ветку для сравнения
-    git fetch "$target_remote" "$branch_name" --quiet 2>/dev/null
+    # ВАЖНО: --quiet должен быть ПЕРЕД именем ремоута!
+    git fetch --quiet "$target_remote" "$branch_name" 2>/dev/null
     target_ref="refs/remotes/$target_remote/$branch_name"
     
     target_exists="no"
@@ -170,6 +172,8 @@ git for-each-ref --format="%(refname:short)" "refs/remotes/$SOURCE_REMOTE/silent
     
     # Обычный случай: исходная опережает целевую — пушим в целевой ремоут
     echo "🚀 Отправляем коммит $source_sha в ремоут '$target_remote' как ветку '$branch_name'..."
+    # ВАЖНО: Пушим именно SHA коммита, а не refs/remotes/...!
+    # Иначе GitHub выдаст permission denied из-за cross-fork push protection
     git push "$target_remote" "$source_sha:refs/heads/$branch_name"
     
     if [ $? -eq 0 ]; then
