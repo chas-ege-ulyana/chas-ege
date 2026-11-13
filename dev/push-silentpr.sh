@@ -53,10 +53,8 @@ ask_action() {
     if [ "$target_exists" = "yes" ]; then
         echo "   Target SHA: ${target_sha:0:9}"
 
-        # Проверяем отношение между ветками
-        if [ "$source_sha" = "$target_sha" ]; then
-            echo "   Статус: ✅ Ветки совпадают"
-        elif git merge-base --is-ancestor "$source_sha" "$target_sha"; then
+        # Проверяем отношение между ветками (совпадения сюда уже не доходят)
+        if git merge-base --is-ancestor "$source_sha" "$target_sha"; then
             echo "   Статус: ⚠️  Target опережает source (можно обновить source)"
         elif git merge-base --is-ancestor "$target_sha" "$source_sha"; then
             echo "   Статус: 🚀 Source опережает target (можно запушить)"
@@ -147,6 +145,11 @@ while IFS= read -r ref <&3; do
         target_sha=$(git rev-parse "$target_ref")
     fi
 
+    # Ветки совпадают — молча пропускаем в любом режиме, без вопросов
+    if [ "$target_exists" = "yes" ] && [ "$source_sha" = "$target_sha" ]; then
+        continue
+    fi
+
     # Интерактивный режим
     if [ "$INTERACTIVE" = true ]; then
         ask_action "$ref" "$target_remote" "$branch_name" "$source_sha" "$target_sha" "$target_exists"
@@ -177,20 +180,13 @@ while IFS= read -r ref <&3; do
     fi
 
     # Автоматический режим или действие "y"
-    if [ "$target_exists" = "yes" ]; then
-        # Условие 1: если ветки совпадают — ничего не делаем и не пишем
-        if [ "$source_sha" = "$target_sha" ]; then
-            continue
-        fi
-
-        # Условие 2: если целевая опережает исходную — обновляем source (fast-forward push)
-        if git merge-base --is-ancestor "$source_sha" "$target_sha"; then
-            echo "🔄 Target опережает source, обновляем source..."
-            git push "$SOURCE_REMOTE" "$target_sha:refs/heads/silentpr/$target_remote/$branch_name" --quiet 2>/dev/null
-            echo "✅ Source обновлён"
-            echo "-----------------------------------"
-            continue
-        fi
+    # Если целевая опережает исходную — обновляем source (fast-forward push)
+    if [ "$target_exists" = "yes" ] && git merge-base --is-ancestor "$source_sha" "$target_sha"; then
+        echo "🔄 Target опережает source, обновляем source..."
+        git push "$SOURCE_REMOTE" "$target_sha:refs/heads/silentpr/$target_remote/$branch_name" --quiet 2>/dev/null
+        echo "✅ Source обновлён"
+        echo "-----------------------------------"
+        continue
     fi
 
     # Обычный случай: исходная опережает целевую — пушим в целевой ремоут
