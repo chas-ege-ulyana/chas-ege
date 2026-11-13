@@ -35,14 +35,17 @@ git for-each-ref --format="%(refname:short)" "refs/remotes/$SOURCE_REMOTE/silent
         
         # Условие 2: если целевая опережает исходную — обновляем source (fast-forward push)
         if git merge-base --is-ancestor "$source_sha" "$target_sha"; then
-            git push "$SOURCE_REMOTE" "$target_ref:refs/heads/silentpr/$target_remote/$branch_name" --quiet 2>/dev/null
+            git push "$SOURCE_REMOTE" "$target_sha:refs/heads/silentpr/$target_remote/$branch_name" --quiet 2>/dev/null
             continue
         fi
     fi
     
     # Обычный случай: исходная опережает целевую — пушим в целевой ремоут
-    echo "🚀 Отправляем $ref в ремоут '$target_remote' как ветку '$branch_name'..."
-    git push "$target_remote" "$source_full_ref:refs/heads/$branch_name"
+    echo "🚀 Отправляем коммит $source_sha в ремоут '$target_remote' как ветку '$branch_name'..."
+    # ВАЖНО: Пушим именно SHA коммита, а не refs/remotes/...!
+    # Иначе GitHub выдаст permission denied из-за cross-fork push protection
+    # (защита от пуша веток из чужих форков). При пуше по SHA эта защита обходится.
+    git push "$target_remote" "$source_sha:refs/heads/$branch_name"
     
     if [ $? -eq 0 ]; then
         echo "✅ Успешно запушено!"
