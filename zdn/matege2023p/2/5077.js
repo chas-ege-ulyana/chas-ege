@@ -67,13 +67,13 @@
 			][rand],
 			answers: [nameCylinder[1], nameSphere[1]][rand],
 		});
-		NAtask.modifiers.allDecimalsToStandard(true);
 		genAssertZ1000([nameCylinder[1], nameSphere[1]][rand]);
 		NAtask.modifiers.addCanvasIllustration({
 			width: 400,
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	}, 1000);
 
 })();
