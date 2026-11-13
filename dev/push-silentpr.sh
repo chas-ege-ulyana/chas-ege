@@ -29,7 +29,12 @@ echo "🔄 Подтягиваем свежие ветки из $SOURCE_REMOTE...
 # ВАЖНО: --quiet должен быть ПЕРЕД именем ремоута!
 git fetch --quiet --prune "$SOURCE_REMOTE"
 
-# Функция для интерактивного запроса
+# Функция для интерактивного запроса.
+# ВАЖНО:
+#  - Вызывать напрямую, НЕ через $(...): весь текст должен идти на экран,
+#    а не в переменную. Ответ возвращается в глобальной переменной ACTION.
+#  - read читает stdin (терминал). Список веток в основном цикле читается
+#    из FD 3, чтобы не конфликтовать с этим read (см. комментарий у цикла).
 ask_action() {
     local ref="$1"
     local target_remote="$2"
@@ -37,16 +42,17 @@ ask_action() {
     local source_sha="$4"
     local target_sha="$5"
     local target_exists="$6"
-    
+    local choice
+
     echo ""
     echo "📋 SilentPR: $ref"
     echo "   Целевой ремоут: $target_remote"
     echo "   Имя ветки: $branch_name"
     echo "   Source SHA: ${source_sha:0:9}"
-    
+
     if [ "$target_exists" = "yes" ]; then
         echo "   Target SHA: ${target_sha:0:9}"
-        
+
         # Проверяем отношение между ветками
         if [ "$source_sha" = "$target_sha" ]; then
             echo "   Статус: ✅ Ветки совпадают"
@@ -61,7 +67,7 @@ ask_action() {
         echo "   Target SHA: (не существует)"
         echo "   Статус: 🆕 Target не существует"
     fi
-    
+
     echo ""
     echo "Действие? [y/n/d/?]"
     echo "  y - Запушить source в target (или обновить source если target опережает)"
@@ -69,23 +75,29 @@ ask_action() {
     echo "  d - Удалить изменения: force reset source к target (сбросить к состоянию target)"
     echo "  ? - Показать эту справку"
     echo ""
-    
+
+    ACTION=""
     while true; do
-        read -p "Ваш выбор: " choice
+        if ! read -r -p "Ваш выбор: " choice; then
+            # EOF (Ctrl+D или закрытый stdin): не зацикливаемся, а завершаем работу
+            echo ""
+            echo "⏹️  Ввод закончился (EOF) — выходим."
+            exit 0
+        fi
         case "$choice" in
             y|Y)
-                echo "$choice"
+                ACTION="y"
                 return
                 ;;
             n|N)
-                echo "$choice"
+                ACTION="n"
                 return
                 ;;
             d|D)
-                echo "$choice"
+                ACTION="d"
                 return
                 ;;
-            ?)
+            '?')
                 echo ""
                 echo "Доступные действия:"
                 echo "  y - Запушить source в target (или обновить source если target опережает)"
@@ -103,32 +115,43 @@ ask_action() {
 
 # Проходимся по всем remote-tracking веткам, которые лежат в silentpr/
 # Формат: refs/remotes/<source>/silentpr/<target_remote>/<branch_name>
-git for-each-ref --format="%(refname:short)" "refs/remotes/$SOURCE_REMOTE/silentpr/*/*" | while read -r ref; do
+# ВАЖНО:
+#  - Список веток читаем из FD 3 (<&3), а stdin оставляем терминалу:
+#    при `git for-each-ref | while read` интерактивный read внутри цикла
+#    съедал строки списка веток вместо ответов пользователя, а на EOF
+#    зацикливался намертво — скрипт "подвисал" сразу после fetch.
+#  - Паттерн — префикс silentpr (без /*/*): у for-each-ref '*' не пересекает
+#    '/', поэтому /*/* терял ветки с '/' в имени (например silentpr/bob/fix/typo).
+while IFS= read -r ref <&3; do
     # Разбиваем строку на массив по слешу
     IFS='/' read -ra parts <<< "$ref"
+    # Пропускаем ссылки без имени ветки (silentpr/<target> и короче)
+    if [ "${#parts[@]}" -lt 4 ]; then
+        continue
+    fi
     target_remote="${parts[2]}"
     branch_name=$(IFS=/; echo "${parts[*]:3}")
-    
+
     source_full_ref="refs/remotes/$ref"
     source_sha=$(git rev-parse "$source_full_ref")
-    
+
     # Подтягиваем целевую ветку для сравнения
     # ВАЖНО: --quiet должен быть ПЕРЕД именем ремоута!
     git fetch --quiet "$target_remote" "$branch_name" 2>/dev/null
     target_ref="refs/remotes/$target_remote/$branch_name"
-    
+
     target_exists="no"
     target_sha=""
     if git rev-parse "$target_ref" >/dev/null 2>&1; then
         target_exists="yes"
         target_sha=$(git rev-parse "$target_ref")
     fi
-    
+
     # Интерактивный режим
     if [ "$INTERACTIVE" = true ]; then
-        action=$(ask_action "$ref" "$target_remote" "$branch_name" "$source_sha" "$target_sha" "$target_exists")
-        
-        case "$action" in
+        ask_action "$ref" "$target_remote" "$branch_name" "$source_sha" "$target_sha" "$target_exists"
+
+        case "$ACTION" in
             n)
                 echo "⏭️  Пропускаем $ref"
                 echo "-----------------------------------"
@@ -150,16 +173,16 @@ git for-each-ref --format="%(refname:short)" "refs/remotes/$SOURCE_REMOTE/silent
                 continue
                 ;;
         esac
-        # action = y, продолжаем с обычным пушем
+        # ACTION = y, продолжаем с обычным пушем
     fi
-    
+
     # Автоматический режим или действие "y"
     if [ "$target_exists" = "yes" ]; then
         # Условие 1: если ветки совпадают — ничего не делаем и не пишем
         if [ "$source_sha" = "$target_sha" ]; then
             continue
         fi
-        
+
         # Условие 2: если целевая опережает исходную — обновляем source (fast-forward push)
         if git merge-base --is-ancestor "$source_sha" "$target_sha"; then
             echo "🔄 Target опережает source, обновляем source..."
@@ -169,17 +192,17 @@ git for-each-ref --format="%(refname:short)" "refs/remotes/$SOURCE_REMOTE/silent
             continue
         fi
     fi
-    
+
     # Обычный случай: исходная опережает целевую — пушим в целевой ремоут
     echo "🚀 Отправляем коммит $source_sha в ремоут '$target_remote' как ветку '$branch_name'..."
     # ВАЖНО: Пушим именно SHA коммита, а не refs/remotes/...!
     # Иначе GitHub выдаст permission denied из-за cross-fork push protection
     git push "$target_remote" "$source_sha:refs/heads/$branch_name"
-    
+
     if [ $? -eq 0 ]; then
         echo "✅ Успешно запушено!"
     else
         echo "❌ Ошибка пуша. Возможно, нет прав или ветка diverged."
     fi
     echo "-----------------------------------"
-done
+done 3< <(git for-each-ref --format="%(refname:short)" "refs/remotes/$SOURCE_REMOTE/silentpr")
