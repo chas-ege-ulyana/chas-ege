@@ -79,13 +79,13 @@
 			analys: '',
 		});
 		NAtask.modifiers.multiplyAnswerBySqrt(13);
-		NAtask.modifiers.allDecimalsToStandard(true);
 		NAtask.modifiers.assertSaneDecimals();
 		NAtask.modifiers.addCanvasIllustration({
 			width: 400,
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	}, 1000);
 })();
 //27068 73157 509838 73111 73113 73115 73117 73119 73121 73123 73125 73127 73129 73131 73133 73135 73137 73139 73141 73143 73145 73147 73149 73151 73153 73155

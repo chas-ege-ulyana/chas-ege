@@ -89,7 +89,6 @@
 				'$' + '<br>' + '$CA_1=' + (pyr.sideEdgeC.pow(2)).texsqrt(1) + '$',
 			author: ['Суматохина Александра']
 		});
-		NAtask.modifiers.allDecimalsToStandard(true);
 		NAtask.modifiers.assertSaneDecimals();
 		NAtask.modifiers.variativeABC(letter);
 
@@ -98,6 +97,7 @@
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	}, 100000);
 })();
 /*
