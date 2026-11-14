@@ -64,13 +64,13 @@
 			author: ['Суматохина Александра'],
 		});
 		NAtask.modifiers.multiplyAnswerBySqrt(13);
-		NAtask.modifiers.allDecimalsToStandard(true);
 		NAtask.modifiers.assertSaneDecimals();
 		NAtask.modifiers.addCanvasIllustration({
 			width: 400,
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	});
 })();
 // 27109 74849 74855 74887 510065 74851 74853 74857 74859 74861 74863 74865 74867 74869 74871 74873 74875 74877 74879 74881 74883 74885 74889 74891

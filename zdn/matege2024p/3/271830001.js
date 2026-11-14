@@ -81,13 +81,13 @@
 				'Объём призмы: $' + prism.volume + '$' + '<br>',
 			author: ['Суматохина Александра']
 		});
-		NAtask.modifiers.allDecimalsToStandard(true);
 
 		NAtask.modifiers.addCanvasIllustration({
 			width: 400,
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	}, 100000);
 })();
 /*

@@ -97,12 +97,12 @@
 			analys: 'Всего точек экстремума: ' + extremumsAll.length + '<br>' +
 				extremumsAll.map((elem) => '$(' + elem[0].toFixedLess(2) + ';' + elem[1].toFixedLess(2) + ')$').join(' ').replace('-0', '0'),
 		});
-		NAtask.modifiers.allDecimalsToStandard(true);
 		NAtask.modifiers.addCanvasIllustration({
 			width: 500,
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	});
 })();
 //28 по Ширяевой

@@ -74,7 +74,6 @@
 			answers: find.pop(),
 		});
 		NAtask.modifiers.multiplyAnswerBySqrt(30);
-		NAtask.modifiers.allDecimalsToStandard(true);
 		NAtask.modifiers.assertSaneDecimals();
 		NAtask.modifiers.variativeABC(letter);
 		NAtask.modifiers.addCanvasIllustration({
@@ -82,6 +81,7 @@
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	}, 1000);
 })();
 

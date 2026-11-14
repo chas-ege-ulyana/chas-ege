@@ -78,13 +78,13 @@
 		});
 		NAtask.modifiers.variativeABC(letters);
 		NAtask.modifiers.multiplyAnswerBySqrt(13);
-		NAtask.modifiers.allDecimalsToStandard(true);
 		NAtask.modifiers.assertSaneDecimals();
 		NAtask.modifiers.addCanvasIllustration({
 			width: 400,
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	},10);
 })();
 //https://ege314.ru/8-stereometriya-ege/reshenie-3011/

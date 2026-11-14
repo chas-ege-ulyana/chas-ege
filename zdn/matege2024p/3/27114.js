@@ -68,13 +68,13 @@
 		});
 		NAtask.modifiers.variativeABC(letters);
 		NAtask.modifiers.multiplyAnswerBySqrt(13);
-		NAtask.modifiers.allDecimalsToStandard(true);
 		NAtask.modifiers.assertSaneDecimals();
 		NAtask.modifiers.addCanvasIllustration({
 			width: 400,
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	});
 })();
 //27114 75015 75063 519535 75017 75019 75021 75023 75025 75027 75029 75031 75033 75035 75037 75039 75041 75043 75045 75047 75049 75051 75053 75055 75057 75059 75061

@@ -94,13 +94,13 @@
 			authors: ['Суматохина Александра'],
 		});
 		//NAtask.modifiers.multiplyAnswerBySqrt(12);
-		NAtask.modifiers.allDecimalsToStandard(true);
 		NAtask.modifiers.assertSaneDecimals();
 		NAtask.modifiers.addCanvasIllustration({
 			width: 500,
 			height: 400,
 			paint: paint1,
 		});
+		NAtask.modifiers.allDecimalsToStandard(true);
 	}, 100000);
 })();
 //3243
