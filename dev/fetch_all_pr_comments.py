@@ -153,14 +153,18 @@ def get_all_pages(url, headers):
     Все элементы списка из GitHub API, со всех страниц.
     Без per_page и перехода по ссылке rel="next" API отдаёт только первые 30 элементов,
     и длинное обсуждение молча обрезается.
-    Возвращает None, если хоть один запрос вернул не 200 (о чём пишет в консоль).
+    Возвращает None, если хоть один запрос вернул не 200 или не прошёл (о чём пишет в консоль).
     """
     items = []
     params = {"per_page": 100}
     while url:
-        response = requests.get(url, headers=headers, params=params)
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+        except requests.RequestException as e:
+            print(f"\n  ⚠ {url}: {type(e).__name__}")
+            return None
         if response.status_code != 200:
-            print(f"\n  ⚠ {url}: код {response.status_code}", end=' ')
+            print(f"\n  ⚠ {url}: код {response.status_code}")
             return None
         items.extend(response.json())
         url = response.links.get("next", {}).get("url")
@@ -347,12 +351,19 @@ def main():
     print(f"  Всего issue comments: {sum(pr['total_issue_comments'] for pr in all_prs_data)}")
     print(f"  Всего review comments: {sum(pr['total_review_comments'] for pr in all_prs_data)}")
     print(f"  Всего комментариев: {sum(pr['total_comments'] for pr in all_prs_data)}")
+    print(f"  Всего ревью: {sum(pr['total_reviews'] for pr in all_prs_data)}")
 
     print("\n=== СВОДКА ===")
     for pr in all_prs_data:
         title = pr['pr_title'][:50] + "..." if len(pr['pr_title']) > 50 else pr['pr_title']
         print(f"PR #{pr['pr_number']}: {title}")
-        print(f"  Issue: {pr['total_issue_comments']}, Review: {pr['total_review_comments']}")
+        print(f"  Issue: {pr['total_issue_comments']}, Review: {pr['total_review_comments']},"
+              f" ревью: {pr['total_reviews']}"
+              + (" — НЕ ВСЁ" if pr['incomplete'] else ""))
+
+    incomplete_prs = [pr['pr_number'] for pr in all_prs_data if pr['incomplete']]
+    if incomplete_prs:
+        print(f"\n⚠ Выгружены не полностью: {', '.join(map(str, incomplete_prs))}")
 
 if __name__ == "__main__":
     main()
