@@ -83,30 +83,42 @@ function ask(prompt) {
 function eofExit() { console.log('\n⏹️  Ввод закончился (EOF) — выходим.'); process.exit(0); }
 
 // ---------- строка состояния ----------
-// Верхняя строка терминала отдаётся под счётчики, остальное — область прокрутки (DECSTBM).
-// Работает и с наследуемым выводом git: область прокрутки — состояние терминала, а не процесса.
-// Без TTY (pipe, CI) полностью выключено: вывод остаётся байт в байт прежним.
+// safe (по умолчанию): счётчики в заголовке окна/вкладки (OSC) + печатная строка
+//   перед каждым silentpr. Курсором не управляет вовсе — вывод git затереть не может.
+// top (--ui=top): верхняя строка терминала под панель, остальное — область прокрутки
+//   (DECSTBM). Область прокрутки — состояние терминала, а не процесса, поэтому
+//   цветной diff и пейджер git живут как жили.
+// Без TTY (pipe, CI), при TERM=dumb и с --no-ui всё выключено.
 const UI = {
-  on: false, total: 0, index: 0, pushed: 0, deleted: 0, skipped: 0, failed: 0, current: '',
+  mode: 'off', total: 0, index: 0, pushed: 0, deleted: 0, skipped: 0, hidden: 0, failed: 0, current: '',
+  line() {
+    return `silentpr ${this.index}/${this.total} | осталось ${Math.max(0, this.total - this.index)}` +
+      ` | запушено ${this.pushed} | снесено ${this.deleted} | пропущено ${this.skipped}` +
+      (this.hidden ? ` | скрыто ${this.hidden}` : '') +
+      (this.failed ? ` | ошибок ${this.failed}` : '') + (this.current ? ` | ${this.current}` : '');
+  },
   init() {
-    if (!this.on) return;
+    if (this.mode === 'safe') { process.stdout.write('\x1b[22;0t'); this.draw(); return; }
+    if (this.mode !== 'top') return;
     const rows = process.stdout.rows || 24;
     process.stdout.write('\x1b[2J\x1b[H');
     process.stdout.write(`\x1b[2;${rows}r\x1b[2;1H`);
     this.draw();
   },
   draw() {
-    if (!this.on) return;
+    if (this.mode === 'off') return;
     const cols = process.stdout.columns || 80;
-    let s = `silentpr ${this.index}/${this.total} | осталось ${Math.max(0, this.total - this.index)}` +
-            ` | запушено ${this.pushed} | снесено ${this.deleted} | пропущено ${this.skipped}` +
-            (this.failed ? ` | ошибок ${this.failed}` : '') + (this.current ? ` | ${this.current}` : '');
+    let s = this.line();
     if (s.length > cols) s = s.slice(0, cols - 1) + '…';
+    if (this.mode === 'safe') { process.stdout.write(`\x1b]0;${s}\x07`); return; }
+    // top: сохраняем/возвращаем курсор — панель не сдвигает точку вывода git.
     process.stdout.write('\x1b7\x1b[1;1H\x1b[2K\x1b[7m' + s.padEnd(cols) + '\x1b[0m\x1b8');
   },
+  banner() { if (this.mode === 'safe') console.log(`📊 ${this.line()}`); },
   done() {
-    if (!this.on) return;
-    this.on = false;
+    const m = this.mode; this.mode = 'off';
+    if (m === 'safe') { process.stdout.write('\x1b[23;0t'); return; }
+    if (m !== 'top') return;
     process.stdout.write('\x1b[r\x1b7\x1b[1;1H\x1b[2K\x1b8\n');
   },
 };
@@ -345,30 +357,46 @@ async function splitPush(base, targetRemote, branchName, sourceSha) {
 
 // ---------- main ----------
 async function main() {
-  let sourceRemote = '', interactive = false, all = false, noUi = false;
+  let sourceRemote = '', interactive = false, all = false, uiMode = 'safe';
   const usage = (code) => {
     console.log(`Использование: ${process.argv[1]} [-i] <source_remote>`);
     console.log(`Пример: ${process.argv[1]} -i chas-ege-ulyana`);
     console.log('Флаги можно ставить где угодно: и до, и после имени ремоута.');
     console.log('  -i, --interactive  Интерактивный режим (y/n/d/s/f для каждого silentpr)');
     console.log('  --all              Все ремоуты: пройти по всем silentpr во всех форках');
-    console.log('  --no-ui            Не рисовать строку состояния вверху терминала');
+    console.log('  --ui=top|safe|off  Строка состояния: top — панель вверху терминала;');
+    console.log('                     safe (по умолчанию) — заголовок окна + строка перед каждым silentpr;');
+    console.log('                     off — ничего не рисовать');
+    console.log('  --no-ui            То же, что --ui=off');
     console.log('  -h, --help         Эта справка');
     process.exit(code);
   };
-  for (const a of process.argv.slice(2)) {
+  const argv = process.argv.slice(2);
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
     if (a === '-i' || a === '--interactive') interactive = true;
     else if (a === '-h' || a === '--help') usage(0);
     else if (a === '--all') all = true;
-    else if (a === '--no-ui') noUi = true;
+    else if (a === '--no-ui') uiMode = 'off';
+    else if (a.startsWith('--ui=')) {
+      const v = a.slice(5);
+      if (!['top', 'safe', 'off'].includes(v)) { console.log(`Неизвестный режим UI: ${v} (top|safe|off)`); usage(1); }
+      uiMode = v;
+    }
     else if (a.startsWith('-')) { console.log(`Неизвестный флаг: ${a}`); usage(1); }
     else if (sourceRemote) { console.log(`Лишний аргумент: ${a} (ремоут уже задан: ${sourceRemote})`); usage(1); }
     else sourceRemote = a;
   }
   if (all && sourceRemote) { console.log('--all и имя ремоута вместе нельзя: выбери что-то одно.'); usage(1); }
   if (!all && !sourceRemote) usage(1);
-  UI.on = process.stdout.isTTY && process.env.TERM !== 'dumb' && !noUi;
-  if (UI.on) process.stdout.on('resize', () => { const rows = process.stdout.rows || 24; process.stdout.write(`\x1b[2;${rows}r`); UI.draw(); });
+  UI.mode = (process.stdout.isTTY && process.env.TERM !== 'dumb') ? uiMode : 'off';
+  if (UI.mode === 'top') process.stdout.on('resize', () => {
+    const rows = process.stdout.rows || 24;
+    // DECSTBM ставит курсор в home (строка 1, ВНЕ области) — сохраняем и возвращаем курсор,
+    // иначе следующая строка вывода git ляжет на панель и будет затёрта перерисовкой.
+    process.stdout.write(`\x1b7\x1b[2;${rows}r\x1b8`);
+    UI.draw();
+  });
 
   const remotes = all ? (gitOut(['remote']) || '').split('\n').filter(Boolean) : [sourceRemote];
   const jobs = [];
@@ -398,6 +426,7 @@ async function main() {
     // Ветки совпадают — молча пропускаем в любом режиме
     if (st.exists && sourceSha === st.sha) { UI.skipped++; UI.draw(); continue; }
 
+    UI.banner();
     const srcRef = `silentpr/${targetRemote}/${branchName}`;
     if (interactive) {
       // askAction может обновить st (действие f) — дальше работаем со свежим состоянием
@@ -475,5 +504,6 @@ async function main() {
   }
   rl.close();
   UI.done();
+  console.log(`📊 Итого из ${UI.total}: запушено ${UI.pushed}, снесено ${UI.deleted}, пропущено ${UI.skipped}, скрыто ${UI.hidden}, ошибок ${UI.failed}`);
 }
 main().catch((e) => { console.error(e); process.exit(1); });
