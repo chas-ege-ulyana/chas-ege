@@ -184,7 +184,7 @@ function showCommit(c) {
 }
 
 // ---------- что показывать и что фильтровать ----------
-// Пара для диффа считается один раз: её используют и фильтры (--no-reverse,
+// Пара для диффа считается один раз: её используют и фильтры (--skip-reverse,
 // --max-diff-lines), и askAction. После действия f пересчитывается заново.
 function displayPair(sourceSha, targetRemote, branchName, st) {
   const p = { a: '', b: '', splitBase: '', splitWhy: '', title: '', reverse: false };
@@ -380,14 +380,17 @@ async function splitPush(base, targetRemote, branchName, sourceSha) {
 
 // ---------- main ----------
 async function main() {
-  let sourceRemote = '', interactive = false, all = false, uiMode = 'safe', noReverse = false, maxDiff = null;
+  let sourceRemote = '', interactive = false, all = false, uiMode = 'safe', skipReverse = false, maxDiff = null;
+  let skipDiverged = false, listDiverged = false;
   const usage = (code) => {
     console.log(`Использование: ${process.argv[1]} [-i] <source_remote>`);
     console.log(`Пример: ${process.argv[1]} -i chas-ege-ulyana`);
     console.log('Флаги можно ставить где угодно: и до, и после имени ремоута.');
     console.log('  -i, --interactive  Интерактивный режим (y/n/d/s/f для каждого silentpr)');
     console.log('  --all              Все ремоуты: пройти по всем silentpr во всех форках');
-    console.log('  --no-reverse       Не показывать silentpr, где target опережает source');
+    console.log('  --skip-reverse     Не показывать silentpr, где target опережает source (--no-reverse — устаревший синоним)');
+    console.log('  --skip-diverged    Не показывать silentpr, где ветки разошлись (diverged)');
+    console.log('  --list-diverged    В конце вывести список diverged silentpr');
     console.log('  --max-diff-lines N Пропускать silentpr с диффом больше N строк (сумма + и −, бинарники не в счёт)');
     console.log('  --ui=top|safe|off  Строка состояния: top — панель вверху терминала;');
     console.log('                     safe (по умолчанию) — заголовок окна + строка перед каждым silentpr;');
@@ -403,7 +406,9 @@ async function main() {
     else if (a === '-h' || a === '--help') usage(0);
     else if (a === '--all') all = true;
     else if (a === '--no-ui') uiMode = 'off';
-    else if (a === '--no-reverse') noReverse = true;
+    else if (a === '--skip-reverse' || a === '--no-reverse') skipReverse = true;
+    else if (a === '--skip-diverged') skipDiverged = true;
+    else if (a === '--list-diverged') listDiverged = true;
     else if (a === '--max-diff-lines' || a.startsWith('--max-diff-lines=')) {
       const v = a.includes('=') ? a.slice('--max-diff-lines='.length) : argv[++i];
       if (!/^\d+$/.test(v || '') || parseInt(v, 10) <= 0) { console.log(`--max-diff-lines ждёт положительное целое, получено: ${v}`); usage(1); }
@@ -442,6 +447,7 @@ async function main() {
   UI.total = jobs.length;
   UI.init();
   console.log(`📋 Всего silentpr к разбору: ${jobs.length}`);
+  const divergedRefs = [];
   for (const job of jobs) {
     const sourceRemote = job.remote, ref = job.ref;
     UI.index++; UI.current = ref; UI.draw();
@@ -454,20 +460,29 @@ async function main() {
 
     const st = targetState(targetRemote, branchName);
 
+    const srcRef = `silentpr/${targetRemote}/${branchName}`;
+
+    // Классификация по достоверному состоянию target: равенство / reverse / diverged.
+    const equal = st.exists && sourceSha === st.sha;
+    const isReverse = !equal && st.exists && st.certain && gitOk(['merge-base', '--is-ancestor', sourceSha, st.sha]);
+    const isDiverged = st.exists && st.certain && !equal && !isReverse &&
+      !gitOk(['merge-base', '--is-ancestor', st.sha, sourceSha]);
+    if (isDiverged) divergedRefs.push(ref);
+
     // Ветки совпадают — молча пропускаем в любом режиме
-    if (st.exists && sourceSha === st.sha) { UI.skipped++; UI.draw(); continue; }
+    if (equal) { UI.skipped++; UI.draw(); continue; }
 
     // Фильтры: скрытые не рисуются вообще, но видны счётчиком «скрыто».
     // Пара считается лениво: без фильтров и без -i лишние fetch не нужны.
     let pair = null;
     const getPair = () => (pair || (pair = displayPair(sourceSha, targetRemote, branchName, st)));
-    if (noReverse && st.exists && getPair().reverse) { UI.hidden++; UI.draw(); continue; }
+    if (skipReverse && isReverse) { UI.hidden++; UI.draw(); continue; }
+    if (skipDiverged && isDiverged) { UI.hidden++; UI.draw(); continue; }
     if (maxDiff !== null) {
       const n = diffLines(getPair(), sourceSha);
       if (n !== null && n > maxDiff) { UI.hidden++; UI.draw(); continue; }
     }
     UI.banner();
-    const srcRef = `silentpr/${targetRemote}/${branchName}`;
     if (interactive) {
       // askAction может обновить st (действие f) — дальше работаем со свежим состоянием
       const { action, splitBase } = await askAction(ref, targetRemote, branchName, sourceSha, st, getPair());
@@ -545,5 +560,9 @@ async function main() {
   rl.close();
   UI.done();
   console.log(`📊 Итого из ${UI.total}: запушено ${UI.pushed}, снесено ${UI.deleted}, пропущено ${UI.skipped}, скрыто ${UI.hidden}, ошибок ${UI.failed}`);
+  if (listDiverged) {
+    console.log(`🔀 Diverged: ${divergedRefs.length}`);
+    for (const r of divergedRefs) console.log(`   ${r}`);
+  }
 }
 main().catch((e) => { console.error(e); process.exit(1); });
