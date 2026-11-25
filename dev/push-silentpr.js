@@ -183,6 +183,59 @@ function showCommit(c) {
   gitInherit(['diff', '--color=always', '--stat', '--patch', `${c}^`, c]);
 }
 
+// ---------- что показывать и что фильтровать ----------
+// Пара для диффа считается один раз: её используют и фильтры (--no-reverse,
+// --max-diff-lines), и askAction. После действия f пересчитывается заново.
+function displayPair(sourceSha, targetRemote, branchName, st) {
+  const p = { a: '', b: '', splitBase: '', splitWhy: '', title: '', reverse: false };
+  if (st.exists) {
+    if (gitOk(['merge-base', '--is-ancestor', sourceSha, st.sha])) {
+      p.a = sourceSha; p.b = st.sha; p.reverse = true;
+      p.title = '📄 Diff source → target (что получит source при обновлении):';
+      p.splitWhy = 's недоступен: source отстаёт от target, пушить нечего (y обновит source)';
+    } else {
+      p.a = st.sha; p.b = sourceSha;
+      p.title = '📄 Diff target → source (что уйдёт в target при пуше):';
+      if (gitOk(['merge-base', '--is-ancestor', st.sha, sourceSha])) p.splitBase = st.sha;
+      else p.splitWhy = 's недоступен: ветки diverged, сначала нужен merge/rebase';
+    }
+    return p;
+  }
+  let base = '', baseName = '';
+  for (const cand of ['devel', 'main', 'master']) {
+    const r = `refs/remotes/${targetRemote}/${cand}`;
+    if (gitOk(['rev-parse', '--verify', '--quiet', r])) {
+      const mb = gitOut(['merge-base', sourceSha, r]);
+      if (mb && mb.trim()) { base = mb.trim(); baseName = `${targetRemote}/${cand}`; break; }
+    }
+  }
+  if (!base && gitQuiet(['fetch', '--quiet', targetRemote, 'devel']) === 0) {
+    const mb = gitOut(['merge-base', sourceSha, 'FETCH_HEAD']);
+    if (mb && mb.trim()) { base = mb.trim(); baseName = `${targetRemote}/devel`; }
+  }
+  if (base) {
+    p.a = base; p.b = sourceSha; p.splitBase = base;
+    p.title = `📄 Diff от общей базы с ${baseName} (ветка новая):`;
+  } else {
+    p.title = '📄 Общей базы нет, показываю последний коммит source:';
+    p.splitWhy = 's недоступен: нет общей базы для отсчёта коммитов';
+  }
+  return p;
+}
+// Сколько строк изменено в том самом диффе, который увидит человек (сумма + и −).
+// Бинарники в --numstat дают '-' и в счёт не идут. null — git посчитать не смог.
+function diffLines(p, sourceSha) {
+  const out = p.a ? gitOut(['diff', '--numstat', '--no-renames', p.a, p.b])
+    : gitOut(['show', '--numstat', '--format=', '--no-renames', sourceSha]);
+  if (out === null) return null;
+  let n = 0;
+  for (const line of out.split('\n').filter(Boolean)) {
+    const [add, del] = line.split('\t');
+    n += (parseInt(add, 10) || 0) + (parseInt(del, 10) || 0);
+  }
+  return n;
+}
+
 // ---------- интерактивный вопрос ----------
 const HELP = [
   '  y - Запушить source в target (или обновить source если target опережает)',
@@ -192,7 +245,7 @@ const HELP = [
   '  f - Сфетчить целевой ремоут целиком (--prune) и перепроверить target',
   '  ? - Показать эту справку',
 ];
-async function askAction(ref, targetRemote, branchName, sourceSha, state) {
+async function askAction(ref, targetRemote, branchName, sourceSha, state, pair) {
   // redraw: после действия f шапка и diff перерисовываются заново, уже по свежему состоянию.
   redraw: for (;;) {
     const targetSha = state.sha, targetExists = state.exists;
@@ -224,44 +277,13 @@ async function askAction(ref, targetRemote, branchName, sourceSha, state) {
     }
 
     // Diff перед вопросом + база для split-режима (действие s)
-    let splitBase = '', splitWhy = '', dispA = '', dispB = '';
+    let splitBase = pair.splitBase, splitWhy = pair.splitWhy;
     console.log('');
-    if (targetExists) {
-      if (gitOk(['merge-base', '--is-ancestor', sourceSha, targetSha])) {
-        console.log('📄 Diff source → target (что получит source при обновлении):');
-        dispA = sourceSha; dispB = targetSha;
-        splitWhy = 's недоступен: source отстаёт от target, пушить нечего (y обновит source)';
-      } else {
-        console.log('📄 Diff target → source (что уйдёт в target при пуше):');
-        dispA = targetSha; dispB = sourceSha;
-        if (gitOk(['merge-base', '--is-ancestor', targetSha, sourceSha])) splitBase = targetSha;
-        else splitWhy = 's недоступен: ветки diverged, сначала нужен merge/rebase';
-      }
-    } else {
-      let base = '', baseName = '';
-      for (const cand of ['devel', 'main', 'master']) {
-        const r = `refs/remotes/${targetRemote}/${cand}`;
-        if (gitOk(['rev-parse', '--verify', '--quiet', r])) {
-          const mb = gitOut(['merge-base', sourceSha, r]);
-          if (mb && mb.trim()) { base = mb.trim(); baseName = `${targetRemote}/${cand}`; break; }
-        }
-      }
-      if (!base && gitQuiet(['fetch', '--quiet', targetRemote, 'devel']) === 0) {
-        const mb = gitOut(['merge-base', sourceSha, 'FETCH_HEAD']);
-        if (mb && mb.trim()) { base = mb.trim(); baseName = `${targetRemote}/devel`; }
-      }
-      if (base) {
-        console.log(`📄 Diff от общей базы с ${baseName} (ветка новая):`);
-        dispA = base; dispB = sourceSha; splitBase = base;
-      } else {
-        console.log('📄 Общей базы нет, показываю последний коммит source:');
-        gitInherit(['show', '--color=always', '--stat', sourceSha]);
-        splitWhy = 's недоступен: нет общей базы для отсчёта коммитов';
-      }
-    }
+    console.log(pair.title);
     // Неизвестное состояние target — никаких разрушительных действий и никакой разбивки.
     if (!state.certain) { splitBase = ''; splitWhy = 's недоступен: состояние target неизвестно, сначала f'; }
-    if (dispA) showDiff(dispA, dispB);
+    if (pair.a) showDiff(pair.a, pair.b);
+    else gitInherit(['show', '--color=always', '--stat', sourceSha]);
 
     console.log('');
     console.log('Действие? [y/n/d/s/f/?]');
@@ -298,6 +320,7 @@ async function askAction(ref, targetRemote, branchName, sourceSha, state) {
           console.log(`ℹ️  Ветки '${branchName}' в ${targetRemote} нет и после полного fetch.`);
           suggestBranches(targetRemote, branchName);
         }
+        pair = displayPair(sourceSha, targetRemote, branchName, state);
         continue redraw;
       }
       if (c === '?') {
@@ -357,13 +380,15 @@ async function splitPush(base, targetRemote, branchName, sourceSha) {
 
 // ---------- main ----------
 async function main() {
-  let sourceRemote = '', interactive = false, all = false, uiMode = 'safe';
+  let sourceRemote = '', interactive = false, all = false, uiMode = 'safe', noReverse = false, maxDiff = null;
   const usage = (code) => {
     console.log(`Использование: ${process.argv[1]} [-i] <source_remote>`);
     console.log(`Пример: ${process.argv[1]} -i chas-ege-ulyana`);
     console.log('Флаги можно ставить где угодно: и до, и после имени ремоута.');
     console.log('  -i, --interactive  Интерактивный режим (y/n/d/s/f для каждого silentpr)');
     console.log('  --all              Все ремоуты: пройти по всем silentpr во всех форках');
+    console.log('  --no-reverse       Не показывать silentpr, где target опережает source');
+    console.log('  --max-diff-lines N Пропускать silentpr с диффом больше N строк (сумма + и −, бинарники не в счёт)');
     console.log('  --ui=top|safe|off  Строка состояния: top — панель вверху терминала;');
     console.log('                     safe (по умолчанию) — заголовок окна + строка перед каждым silentpr;');
     console.log('                     off — ничего не рисовать');
@@ -378,6 +403,12 @@ async function main() {
     else if (a === '-h' || a === '--help') usage(0);
     else if (a === '--all') all = true;
     else if (a === '--no-ui') uiMode = 'off';
+    else if (a === '--no-reverse') noReverse = true;
+    else if (a === '--max-diff-lines' || a.startsWith('--max-diff-lines=')) {
+      const v = a.includes('=') ? a.slice('--max-diff-lines='.length) : argv[++i];
+      if (!/^\d+$/.test(v || '') || parseInt(v, 10) <= 0) { console.log(`--max-diff-lines ждёт положительное целое, получено: ${v}`); usage(1); }
+      maxDiff = parseInt(v, 10);
+    }
     else if (a.startsWith('--ui=')) {
       const v = a.slice(5);
       if (!['top', 'safe', 'off'].includes(v)) { console.log(`Неизвестный режим UI: ${v} (top|safe|off)`); usage(1); }
@@ -426,11 +457,20 @@ async function main() {
     // Ветки совпадают — молча пропускаем в любом режиме
     if (st.exists && sourceSha === st.sha) { UI.skipped++; UI.draw(); continue; }
 
+    // Фильтры: скрытые не рисуются вообще, но видны счётчиком «скрыто».
+    // Пара считается лениво: без фильтров и без -i лишние fetch не нужны.
+    let pair = null;
+    const getPair = () => (pair || (pair = displayPair(sourceSha, targetRemote, branchName, st)));
+    if (noReverse && st.exists && getPair().reverse) { UI.hidden++; UI.draw(); continue; }
+    if (maxDiff !== null) {
+      const n = diffLines(getPair(), sourceSha);
+      if (n !== null && n > maxDiff) { UI.hidden++; UI.draw(); continue; }
+    }
     UI.banner();
     const srcRef = `silentpr/${targetRemote}/${branchName}`;
     if (interactive) {
       // askAction может обновить st (действие f) — дальше работаем со свежим состоянием
-      const { action, splitBase } = await askAction(ref, targetRemote, branchName, sourceSha, st);
+      const { action, splitBase } = await askAction(ref, targetRemote, branchName, sourceSha, st, getPair());
       if (action === 'n') {
         console.log(`⏭️  Пропускаем ${ref}`); UI.skipped++; UI.draw();
         console.log('-----------------------------------');
