@@ -236,6 +236,23 @@ function diffLines(p, sourceSha) {
   return n;
 }
 
+// ---------- автоочистка принятых silentpr ----------
+// --prune-trivial / --prune-reverse: голова silentpr уже целиком в target
+// (совпадает с ней или является её предком) — по соглашению такой silentpr удаляют.
+// Вызывается только при достоверном состоянии target (st.certain).
+function pruneAccepted(sourceRemote, srcRef, sourceSha, why) {
+  console.log(`🗑️  ${why} — сносим принятую ветку source ${sourceRemote}/${srcRef}`);
+  console.log(`   Было: ${sourceSha}`);
+  console.log(`   Вернуть, если передумаешь: git push ${sourceRemote} ${sourceSha}:refs/heads/${srcRef}`);
+  if (gitInherit(['push', sourceRemote, '--delete', `refs/heads/${srcRef}`]) === 0) {
+    gitQuiet(['update-ref', '-d', `refs/remotes/${sourceRemote}/${srcRef}`]);
+    console.log('   ✅ Ветка source удалена');
+    return true;
+  }
+  console.log('   ❌ Ошибка удаления ветки source');
+  return false;
+}
+
 // ---------- интерактивный вопрос ----------
 const HELP = [
   '  y - Запушить source в target (или обновить source если target опережает)',
@@ -381,7 +398,7 @@ async function splitPush(base, targetRemote, branchName, sourceSha) {
 // ---------- main ----------
 async function main() {
   let sourceRemote = '', interactive = false, all = false, uiMode = 'safe', skipReverse = false, maxDiff = null;
-  let skipDiverged = false, listDiverged = false;
+  let skipDiverged = false, listDiverged = false, pruneTrivial = false, pruneReverse = false;
   const usage = (code) => {
     console.log(`Использование: ${process.argv[1]} [-i] <source_remote>`);
     console.log(`Пример: ${process.argv[1]} -i chas-ege-ulyana`);
@@ -391,6 +408,8 @@ async function main() {
     console.log('  --skip-reverse     Не показывать silentpr, где target опережает source (--no-reverse — устаревший синоним)');
     console.log('  --skip-diverged    Не показывать silentpr, где ветки разошлись (diverged)');
     console.log('  --list-diverged    В конце вывести список diverged silentpr');
+    console.log('  --prune-trivial    Автоматически удалять принятые целиком: голова silentpr == голова target');
+    console.log('  --prune-reverse    Автоматически удалять принятые целиком: голова silentpr — предок головы target');
     console.log('  --max-diff-lines N Пропускать silentpr с диффом больше N строк (сумма + и −, бинарники не в счёт)');
     console.log('  --ui=top|safe|off  Строка состояния: top — панель вверху терминала;');
     console.log('                     safe (по умолчанию) — заголовок окна + строка перед каждым silentpr;');
@@ -409,6 +428,8 @@ async function main() {
     else if (a === '--skip-reverse' || a === '--no-reverse') skipReverse = true;
     else if (a === '--skip-diverged') skipDiverged = true;
     else if (a === '--list-diverged') listDiverged = true;
+    else if (a === '--prune-trivial') pruneTrivial = true;
+    else if (a === '--prune-reverse') pruneReverse = true;
     else if (a === '--max-diff-lines' || a.startsWith('--max-diff-lines=')) {
       const v = a.includes('=') ? a.slice('--max-diff-lines='.length) : argv[++i];
       if (!/^\d+$/.test(v || '') || parseInt(v, 10) <= 0) { console.log(`--max-diff-lines ждёт положительное целое, получено: ${v}`); usage(1); }
@@ -468,6 +489,18 @@ async function main() {
     const isDiverged = st.exists && st.certain && !equal && !isReverse &&
       !gitOk(['merge-base', '--is-ancestor', st.sha, sourceSha]);
     if (isDiverged) divergedRefs.push(ref);
+
+    // Автоочистка принятых целиком — раньше фильтров: --prune-reverse сильнее --skip-reverse.
+    if (equal && pruneTrivial && st.certain) {
+      if (pruneAccepted(sourceRemote, srcRef, sourceSha, 'Голова silentpr совпадает с target (принят целиком)')) UI.deleted++;
+      else UI.failed++;
+      UI.draw(); console.log('-----------------------------------'); continue;
+    }
+    if (isReverse && pruneReverse) {
+      if (pruneAccepted(sourceRemote, srcRef, sourceSha, 'Target опережает source (всё принято)')) UI.deleted++;
+      else UI.failed++;
+      UI.draw(); console.log('-----------------------------------'); continue;
+    }
 
     // Ветки совпадают — молча пропускаем в любом режиме
     if (equal) { UI.skipped++; UI.draw(); continue; }
