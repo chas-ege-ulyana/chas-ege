@@ -48,19 +48,27 @@ for (const reviewer of perCommitReviewers) {
 }
 
 // ─── Статистика автоматических вызовов ассистентов за прогон ───
-// Считаем только успешные вызовы: noteCall стоит рядом с логом «✅ ... выполнен успешно».
-// Неудачные запуски сюда не попадают — они видны в логе по «❌».
+// Считаем успешные и неудачные запуски отдельно:
+//   calls  — скрипт отработал успешно (noteCall стоит рядом с логом «✅ ... выполнен успешно»);
+//   failed — запуск был, но скрипт упал (noteCallFailure стоит в catch рядом с логом «❌»).
+// Ошибки проверок до запуска (API и т.п.) в failed не попадают — считаем именно вызовы.
 // Ключ — GitHub-логин ассистента; для таскбота — условный ключ 'taskbot'
 // (запуски dev/provide_examples_to_PR.mjs, генерация комментариев ПРИМЕРЫ_ЗАДАЧ).
 const callStats = new Map();
 
 function registerCallee(key, label, category) {
-    callStats.set(key, { label, category, calls: 0 });
+    callStats.set(key, { label, category, calls: 0, failed: 0 });
 }
 
 function noteCall(key, label = key, category = 'other') {
     if (!callStats.has(key)) registerCallee(key, label, category);
     callStats.get(key).calls++;
+}
+
+// Неудачный вызов: попытка запуска была, но процесс завершился с ошибкой.
+function noteCallFailure(key, label = key, category = 'other') {
+    if (!callStats.has(key)) registerCallee(key, label, category);
+    callStats.get(key).failed++;
 }
 
 registerCallee('chas-ege-marta', 'Марта (chas-ege-marta)', 'reviewer');
@@ -81,18 +89,21 @@ function printCallStats() {
         ['taskbot', 'Таскбот'],
         ['other', 'Прочие'],
     ];
-    console.log('\n📊 Автоматические вызовы за прогон (только успешные):');
+    console.log('\n📊 Автоматические вызовы за прогон:');
     let total = 0;
+    let totalFailed = 0;
     for (const [category, title] of groups) {
         const entries = [...callStats.values()].filter(e => e.category === category);
         if (entries.length === 0) continue;
         console.log(`   ${title}:`);
         for (const entry of entries) {
-            console.log(`     ${entry.label}: ${entry.calls}`);
+            const failedSuffix = entry.failed > 0 ? ` (неудачных: ${entry.failed})` : '';
+            console.log(`     ${entry.label}: ${entry.calls}${failedSuffix}`);
             total += entry.calls;
+            totalFailed += entry.failed;
         }
     }
-    console.log(`   Всего вызовов: ${total}`);
+    console.log(`   Всего вызовов: ${total} (неудачных: ${totalFailed})`);
 }
 
 function loadPerCommitReviewerCaches() {
@@ -187,6 +198,7 @@ async function handlePRWithExamples(pr, token, cachedComments = null, cachedComm
         return;
     }
     
+    let martaCallAttempted = false;
     try {
         
         // Фильтруем комментарии от Марты
@@ -221,6 +233,7 @@ async function handlePRWithExamples(pr, token, cachedComments = null, cachedComm
         
         // Иначе запускаем bash-скрипт
         console.log(`🚀 PR #${pr.number}: Запускаем ask_Marta_to_review.sh`);
+        martaCallAttempted = true;
         const scriptPath = path.join(projectRoot, 'dev', 'ask_Marta_to_review.sh');
         
         const { stdout, stderr } = await execFileAsync('bash', [scriptPath, pr.number.toString()], {
@@ -246,6 +259,7 @@ ${'='.repeat(80)}
         console.log(`✅ PR #${pr.number}: ask_Marta_to_review.sh выполнен успешно`);
         
     } catch (error) {
+        if (martaCallAttempted) noteCallFailure('chas-ege-marta');
         console.error(`❌ PR #${pr.number}: Ошибка при обработке:`, error.message);
         if (error.stderr) {
             console.error('stderr:', error.stderr);
@@ -452,6 +466,7 @@ async function runProvideScript(prNum, extraArgs) {
         if (stderr) console.warn(`stderr from provide_examples_to_PR.mjs:\n${stderr}`);
         if (stdout) console.log(stdout);
     } catch (error) {
+        noteCallFailure('taskbot');
         console.error(`provide_examples_to_PR.mjs failed for PR ${prNum}:`);
         if (error.stderr) console.error(`stderr: ${error.stderr}`);
         if (error.stdout) console.log(error.stdout);
@@ -775,6 +790,7 @@ main();
 
 async function checkAndAskUser(pr, token, userLogin, scriptName, logName, cachedComments = null, cachedCommits = null) {
     console.log(`🔍 Проверка ${userLogin} для PR #${pr.number}`);
+    let callAttempted = false;
     try {
         const comments = cachedComments || await fetchPRComments(pr.number, token);
         
@@ -814,6 +830,7 @@ async function checkAndAskUser(pr, token, userLogin, scriptName, logName, cached
         }
         
         console.log(`🚀 PR #${pr.number}: Есть свежие замечания для ${userLogin}, зовём!`);
+        callAttempted = true;
         const scriptPath = path.join(projectRoot, 'dev', scriptName);
         
         const { stdout, stderr } = await execFileAsync('bash', [scriptPath, pr.number.toString()], {
@@ -834,6 +851,7 @@ async function checkAndAskUser(pr, token, userLogin, scriptName, logName, cached
         console.log(`✅ PR #${pr.number}: ${scriptName} выполнен успешно`);
         
     } catch (error) {
+        if (callAttempted) noteCallFailure(userLogin, userLogin, 'fixer');
         console.error(`❌ PR #${pr.number}: Ошибка при проверке ${userLogin}:`, error.message);
         if (error.stderr) {
             console.error('stderr:', error.stderr);
@@ -907,6 +925,7 @@ function rememberReviewed(reviewer, cacheKey) {
 async function checkAndAskReviewerPerCommit(pr, token, reviewer, cachedComments = null, cachedCommits = null, getReviews = null) {
     const { name, login, scriptName, logName } = reviewer;
     console.log(`🔍 Проверка ${name} для PR #${pr.number}`);
+    let callAttempted = false;
     try {
         // 1. Получаем коммиты (сначала для проверки кэша)
         const commits = cachedCommits || await fetchPRCommits(pr.number, token);
@@ -959,6 +978,7 @@ async function checkAndAskReviewerPerCommit(pr, token, reviewer, cachedComments 
         }
 
         console.log(`🚀 PR #${pr.number}: Есть новый коммит ${lastCommitSha.substring(0,7)}, ${name} не ответила — зовём!`);
+        callAttempted = true;
         const scriptPath = path.join(projectRoot, 'dev', scriptName);
 
         const { stdout, stderr } = await execFileAsync('bash', [scriptPath, pr.number.toString()], {
@@ -979,6 +999,7 @@ async function checkAndAskReviewerPerCommit(pr, token, reviewer, cachedComments 
         console.log(`✅ PR #${pr.number}: ${scriptName} выполнен успешно`);
 
     } catch (error) {
+        if (callAttempted) noteCallFailure(login, `${name} (${login})`, 'reviewer');
         console.error(`❌ PR #${pr.number}: Ошибка при проверке ${name}:`, error.message);
         if (error.stderr) {
             console.error('stderr:', error.stderr);
