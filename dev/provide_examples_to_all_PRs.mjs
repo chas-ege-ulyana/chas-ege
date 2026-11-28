@@ -47,6 +47,54 @@ for (const reviewer of perCommitReviewers) {
     reviewer.cache = new Set();
 }
 
+// ─── Статистика автоматических вызовов ассистентов за прогон ───
+// Считаем только успешные вызовы: noteCall стоит рядом с логом «✅ ... выполнен успешно».
+// Неудачные запуски сюда не попадают — они видны в логе по «❌».
+// Ключ — GitHub-логин ассистента; для таскбота — условный ключ 'taskbot'
+// (запуски dev/provide_examples_to_PR.mjs, генерация комментариев ПРИМЕРЫ_ЗАДАЧ).
+const callStats = new Map();
+
+function registerCallee(key, label, category) {
+    callStats.set(key, { label, category, calls: 0 });
+}
+
+function noteCall(key, label = key, category = 'other') {
+    if (!callStats.has(key)) registerCallee(key, label, category);
+    callStats.get(key).calls++;
+}
+
+registerCallee('chas-ege-marta', 'Марта (chas-ege-marta)', 'reviewer');
+for (const reviewer of perCommitReviewers) {
+    registerCallee(reviewer.login, `${reviewer.name} (${reviewer.login})`, 'reviewer');
+}
+// Фиксеров зовёт checkAndAskUser; если появится новый — зарегистрировать и здесь,
+// чтобы он попал в сводку, даже когда его не звали ни разу.
+registerCallee('chas-ege-selena', 'Селена (chas-ege-selena)', 'fixer');
+registerCallee('chas-ege-polina', 'Полина (chas-ege-polina)', 'fixer');
+registerCallee('taskbot', 'provide_examples_to_PR.mjs', 'taskbot');
+
+// Сводка «кого и сколько раз позвали» — печатается в самом конце работы скрипта.
+function printCallStats() {
+    const groups = [
+        ['reviewer', 'Ревьюеры'],
+        ['fixer', 'Фиксеры'],
+        ['taskbot', 'Таскбот'],
+        ['other', 'Прочие'],
+    ];
+    console.log('\n📊 Автоматические вызовы за прогон (только успешные):');
+    let total = 0;
+    for (const [category, title] of groups) {
+        const entries = [...callStats.values()].filter(e => e.category === category);
+        if (entries.length === 0) continue;
+        console.log(`   ${title}:`);
+        for (const entry of entries) {
+            console.log(`     ${entry.label}: ${entry.calls}`);
+            total += entry.calls;
+        }
+    }
+    console.log(`   Всего вызовов: ${total}`);
+}
+
 function loadPerCommitReviewerCaches() {
     for (const reviewer of perCommitReviewers) {
         if (!fs.existsSync(reviewer.cacheFilePath)) continue;
@@ -194,6 +242,7 @@ ${'='.repeat(80)}
 `;
         fs.appendFileSync(logPath, logEntry);
         
+        noteCall('chas-ege-marta');
         console.log(`✅ PR #${pr.number}: ask_Marta_to_review.sh выполнен успешно`);
         
     } catch (error) {
@@ -399,6 +448,7 @@ async function runProvideScript(prNum, extraArgs) {
     const runStart = Date.now();
     try {
         const { stdout, stderr } = await execFileAsync('node', scriptArgs, { maxBuffer: 1024 * 1024 * 50 });
+        noteCall('taskbot');
         if (stderr) console.warn(`stderr from provide_examples_to_PR.mjs:\n${stderr}`);
         if (stdout) console.log(stdout);
     } catch (error) {
@@ -711,6 +761,7 @@ async function main() {
     console.log(`⏱️  Суммарное время генерации задач: ${(totalGenerationTime / 1000).toFixed(2)} с`);
     console.log(`⏱️  Полное время работы скрипта:       ${(totalScriptTime / 1000).toFixed(2)} с`);
     console.log(`⏱️  Разница (API и прочие накладные):  ${((totalScriptTime - totalGenerationTime) / 1000).toFixed(2)} с`);
+    printCallStats();
     console.log('==========================================');
     
     if (fatalError) {
@@ -779,6 +830,7 @@ async function checkAndAskUser(pr, token, userLogin, scriptName, logName, cached
         const logEntry = `[${new Date().toISOString()}] PR #${pr.number}\n${stdout}\n${stderr ? 'STDERR: ' + stderr : ''}\n${'='.repeat(80)}\n`;
         fs.appendFileSync(logPath, logEntry);
         
+        noteCall(userLogin, userLogin, 'fixer');
         console.log(`✅ PR #${pr.number}: ${scriptName} выполнен успешно`);
         
     } catch (error) {
@@ -923,6 +975,7 @@ async function checkAndAskReviewerPerCommit(pr, token, reviewer, cachedComments 
         const logEntry = `[${new Date().toISOString()}] PR #${pr.number}\n${stdout}\n${stderr ? 'STDERR: ' + stderr : ''}\n${'='.repeat(80)}\n`;
         fs.appendFileSync(logPath, logEntry);
 
+        noteCall(login, `${name} (${login})`, 'reviewer');
         console.log(`✅ PR #${pr.number}: ${scriptName} выполнен успешно`);
 
     } catch (error) {
